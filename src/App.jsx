@@ -143,8 +143,9 @@ export default function App() {
 
     const { data: expensesData, error: expensesError } = await supabase
       .from('expenses')
-      .select('id, description, amount, paid_by, split_type, created_at, expense_splits(member_id, share_amount)')
+      .select('id, description, amount, paid_by, split_type, expense_date, created_at, expense_splits(member_id, share_amount)')
       .eq('trip_id', tripId)
+      .order('expense_date', { ascending: false })
       .order('created_at', { ascending: false });
 
     if (expensesError) {
@@ -237,7 +238,8 @@ export default function App() {
         description: payload.description,
         amount: payload.amount,
         paid_by: payload.paid_by,
-        split_type: payload.split_type
+        split_type: payload.split_type,
+        expense_date: payload.expense_date
       })
       .select()
       .single();

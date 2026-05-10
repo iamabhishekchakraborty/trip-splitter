@@ -41,7 +41,15 @@ function writeData(data) {
 }
 
 function normalizeData(data) {
-  if (Array.isArray(data.trips)) return data;
+  if (Array.isArray(data.trips)) {
+    return {
+      ...data,
+      expenses: (data.expenses || []).map((expense) => ({
+        ...expense,
+        expense_date: expense.expense_date || (expense.created_at ? expense.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10))
+      }))
+    };
+  }
 
   const legacySeedNames = ['Amit', 'Priya', 'Rahul'];
   const memberNames = (data.members || []).map((member) => member.name).sort();
@@ -61,7 +69,11 @@ function normalizeData(data) {
   return {
     trips: [defaultTrip],
     members: (data.members || []).map((member) => ({ ...member, trip_id: defaultTrip.id })),
-    expenses: (data.expenses || []).map((expense) => ({ ...expense, trip_id: defaultTrip.id }))
+    expenses: (data.expenses || []).map((expense) => ({
+      ...expense,
+      trip_id: defaultTrip.id,
+      expense_date: expense.expense_date || (expense.created_at ? expense.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10))
+    }))
   };
 }
 
@@ -99,7 +111,11 @@ export function loadLocalTripData(tripId) {
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
     expenses: data.expenses
       .filter((expense) => expense.trip_id === tripId)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .sort((a, b) => {
+        const dateDiff = new Date(b.expense_date) - new Date(a.expense_date);
+        if (dateDiff) return dateDiff;
+        return new Date(b.created_at) - new Date(a.created_at);
+      })
   };
 }
 
@@ -154,6 +170,7 @@ export function addLocalExpense(tripId, payload) {
     amount: Number(payload.amount),
     paid_by: payload.paid_by,
     split_type: payload.split_type,
+    expense_date: payload.expense_date,
     created_at: new Date().toISOString(),
     splits: payload.splits.map((split) => ({
       member_id: split.member_id,

@@ -10,6 +10,17 @@ function formatLoggedAt(value) {
   }).format(date);
 }
 
+function formatExpenseDate(value) {
+  if (!value) return 'Unknown date';
+
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return 'Unknown date';
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium'
+  }).format(date);
+}
+
 export default function ExpensesList({ expenses, memberMap }) {
   return (
     <section className="card stack">
@@ -26,6 +37,7 @@ export default function ExpensesList({ expenses, memberMap }) {
                 <p className="muted">
                   Paid by {memberMap[expense.paid_by] || 'Unknown'} - {expense.split_type}
                 </p>
+                <p className="muted">Expense date {formatExpenseDate(expense.expense_date)}</p>
                 <p className="muted">Logged {formatLoggedAt(expense.created_at)}</p>
               </div>
               <strong>₹{Number(expense.amount).toFixed(2)}</strong>

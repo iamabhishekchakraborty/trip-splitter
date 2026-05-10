@@ -24,6 +24,7 @@ create table if not exists expenses (
   amount numeric(12,2) not null check (amount > 0),
   paid_by uuid not null references members(id) on delete restrict,
   split_type text not null check (split_type in ('equal', 'manual')),
+  expense_date date not null default current_date,
   created_at timestamptz not null default now()
 );
 
@@ -38,6 +39,7 @@ create table if not exists expense_splits (
 
 alter table members add column if not exists trip_id uuid references trips(id) on delete cascade;
 alter table expenses add column if not exists trip_id uuid references trips(id) on delete cascade;
+alter table expenses add column if not exists expense_date date;
 
 update members
 set trip_id = '00000000-0000-0000-0000-000000000001'
@@ -47,8 +49,14 @@ update expenses
 set trip_id = '00000000-0000-0000-0000-000000000001'
 where trip_id is null;
 
+update expenses
+set expense_date = created_at::date
+where expense_date is null;
+
 alter table members alter column trip_id set not null;
 alter table expenses alter column trip_id set not null;
+alter table expenses alter column expense_date set default current_date;
+alter table expenses alter column expense_date set not null;
 
 alter table members drop constraint if exists members_name_key;
 

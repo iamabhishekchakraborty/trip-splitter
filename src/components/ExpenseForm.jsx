@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { buildEqualSplits } from '../lib/balances';
 
+function getTodayInputValue() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function ExpenseForm({ members, onAddExpense }) {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
+  const [expenseDate, setExpenseDate] = useState(getTodayInputValue);
   const [paidBy, setPaidBy] = useState('');
   const [splitType, setSplitType] = useState('equal');
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
@@ -59,7 +68,7 @@ export default function ExpenseForm({ members, onAddExpense }) {
     e.preventDefault();
     setFormError('');
 
-    if (!description || !amount || !paidBy || !members.length) return;
+    if (!description || !amount || !expenseDate || !paidBy || !members.length) return;
 
     if (!selectedMemberIds.length) {
       setFormError('Select at least one member to split this expense.');
@@ -73,6 +82,7 @@ export default function ExpenseForm({ members, onAddExpense }) {
     await onAddExpense({
       description,
       amount: Number(amount),
+      expense_date: expenseDate,
       paid_by: paidBy,
       split_type: splitType,
       splits
@@ -80,6 +90,7 @@ export default function ExpenseForm({ members, onAddExpense }) {
 
     setDescription('');
     setAmount('');
+    setExpenseDate(getTodayInputValue());
     setSplitType('equal');
     setSelectedMemberIds(memberIds);
   }
@@ -100,6 +111,12 @@ export default function ExpenseForm({ members, onAddExpense }) {
             <span>Amount</span>
             <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1800" />
           </label>
+          <label>
+            <span>Expense date</span>
+            <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+          </label>
+        </div>
+        <div className="split-grid two">
           <label>
             <span>Paid by</span>
             <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
