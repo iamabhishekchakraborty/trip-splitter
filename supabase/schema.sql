@@ -1,5 +1,9 @@
 create extension if not exists pgcrypto;
 
+-- ============================================================
+-- TABLES
+-- ============================================================
+
 create table if not exists trips (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
@@ -7,9 +11,10 @@ create table if not exists trips (
   created_at timestamptz not null default now()
 );
 
-create table if not exists members (/*  */
+create table if not exists members (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references trips(id) on delete cascade,
+  user_id uuid,
   name text not null,
   created_at timestamptz not null default now(),
   unique (trip_id, name)
@@ -51,6 +56,7 @@ create table if not exists trip_memberships (
 create table if not exists user_profiles (
   user_id uuid primary key,
   email text,
+  display_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -69,29 +75,23 @@ create table if not exists trip_invitations (
   revoked_at timestamptz
 );
 
+-- ============================================================
+-- MIGRATION GUARDS (safe to re-run, idempotent)
+-- ============================================================
+
 alter table trips add column if not exists created_by uuid;
-alter table members add column if not exists trip_id uuid references trips(id) on delete cascade;
+alter table members add column if not exists user_id uuid;
 alter table expenses add column if not exists trip_id uuid references trips(id) on delete cascade;
 alter table expenses add column if not exists expense_date date;
 alter table expenses add column if not exists created_by uuid;
 alter table expenses add column if not exists updated_by uuid;
 alter table expenses add column if not exists updated_at timestamptz;
+alter table user_profiles add column if not exists display_name text;
 
-update members
-set trip_id = '00000000-0000-0000-0000-000000000001'
-where trip_id is null;
-
-update expenses
-set trip_id = '00000000-0000-0000-0000-000000000001'
-where trip_id is null;
-
-update expenses
-set expense_date = created_at::date
-where expense_date is null;
-
-update expenses
-set updated_at = created_at
-where updated_at is null;
+update members set trip_id = '00000000-0000-0000-0000-000000000001' where trip_id is null;
+update expenses set trip_id = '00000000-0000-0000-0000-000000000001' where trip_id is null;
+update expenses set expense_date = created_at::date where expense_date is null;
+update expenses set updated_at = created_at where updated_at is null;
 
 alter table members alter column trip_id set not null;
 alter table expenses alter column trip_id set not null;
@@ -105,15 +105,19 @@ alter table members drop constraint if exists members_name_key;
 do $$
 begin
   if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'members_trip_id_name_key'
+    select 1 from pg_constraint where conname = 'members_trip_id_name_key'
   ) then
     alter table members add constraint members_trip_id_name_key unique (trip_id, name);
   end if;
 end $$;
 
+-- ============================================================
+-- INDEXES
+-- ============================================================
+
 create index if not exists idx_members_trip_id on members(trip_id);
+create index if not exists idx_members_user_id on members(user_id);
+create unique index if not exists idx_members_trip_user_unique on members(trip_id, user_id) where user_id is not null;
 create index if not exists idx_expenses_trip_id on expenses(trip_id);
 create index if not exists idx_expenses_paid_by on expenses(paid_by);
 create index if not exists idx_expense_splits_expense_id on expense_splits(expense_id);
@@ -124,13 +128,32 @@ create index if not exists idx_user_profiles_email on user_profiles(email);
 create index if not exists idx_trip_invitations_trip_id on trip_invitations(trip_id);
 create index if not exists idx_trip_invitations_token on trip_invitations(token);
 
-insert into user_profiles (user_id, email, created_at, updated_at)
-select id, lower(email), created_at, now()
+-- ============================================================
+-- SEED: backfill user_profiles from auth.users
+-- ============================================================
+
+insert into user_profiles (user_id, email, display_name, created_at, updated_at)
+select
+  id,
+  lower(email),
+  coalesce(
+    nullif(trim(raw_user_meta_data->>'full_name'), ''),
+    nullif(trim(raw_user_meta_data->>'name'), ''),
+    nullif(split_part(lower(email), '@', 1), ''),
+    'User'
+  ),
+  created_at,
+  now()
 from auth.users
 on conflict (user_id)
 do update set
   email = excluded.email,
+  display_name = coalesce(nullif(user_profiles.display_name, ''), excluded.display_name),
   updated_at = now();
+
+-- ============================================================
+-- FUNCTIONS
+-- ============================================================
 
 create or replace function sync_user_profile()
 returns trigger
@@ -139,11 +162,23 @@ security definer
 set search_path = public, auth
 as $$
 begin
-  insert into public.user_profiles (user_id, email, created_at, updated_at)
-  values (new.id, lower(new.email), coalesce(new.created_at, now()), now())
+  insert into public.user_profiles (user_id, email, display_name, created_at, updated_at)
+  values (
+    new.id,
+    lower(new.email),
+    coalesce(
+      nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+      nullif(trim(new.raw_user_meta_data->>'name'), ''),
+      nullif(split_part(lower(new.email), '@', 1), ''),
+      'User'
+    ),
+    coalesce(new.created_at, now()),
+    now()
+  )
   on conflict (user_id)
   do update set
     email = excluded.email,
+    display_name = coalesce(nullif(public.user_profiles.display_name, ''), excluded.display_name),
     updated_at = now();
 
   return new;
@@ -165,10 +200,8 @@ security definer
 set search_path = public
 as $$
   select exists (
-    select 1
-    from trip_memberships tm
-    where tm.trip_id = target_trip_id
-      and tm.user_id = auth.uid()
+    select 1 from trip_memberships tm
+    where tm.trip_id = target_trip_id and tm.user_id = auth.uid()
   );
 $$;
 
@@ -180,11 +213,25 @@ security definer
 set search_path = public
 as $$
   select exists (
-    select 1
-    from trip_memberships tm
+    select 1 from trip_memberships tm
     where tm.trip_id = target_trip_id
       and tm.user_id = auth.uid()
       and tm.role in ('owner', 'admin')
+  );
+$$;
+
+create or replace function is_trip_owner(target_trip_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from trip_memberships tm
+    where tm.trip_id = target_trip_id
+      and tm.user_id = auth.uid()
+      and tm.role = 'owner'
   );
 $$;
 
@@ -196,8 +243,7 @@ security definer
 set search_path = public
 as $$
   select not exists (
-    select 1
-    from trip_memberships tm
+    select 1 from trip_memberships tm
     where tm.trip_id = target_trip_id
   );
 $$;
@@ -213,27 +259,124 @@ as $$
     or exists (
       select 1
       from trip_memberships mine
-      join trip_memberships theirs
-        on mine.trip_id = theirs.trip_id
+      join trip_memberships theirs on mine.trip_id = theirs.trip_id
       where mine.user_id = auth.uid()
         and theirs.user_id = target_user_id
     );
 $$;
 
-create or replace function is_trip_owner(target_trip_id uuid)
-returns boolean
+create or replace function preferred_display_name(target_user_id uuid)
+returns text
 language sql
 stable
 security definer
+set search_path = public, auth
+as $$
+  select coalesce(
+    (select nullif(trim(up.display_name), '') from user_profiles up where up.user_id = target_user_id),
+    (select nullif(trim(au.raw_user_meta_data->>'full_name'), '') from auth.users au where au.id = target_user_id),
+    (select nullif(trim(au.raw_user_meta_data->>'name'), '') from auth.users au where au.id = target_user_id),
+    (select nullif(split_part(lower(au.email), '@', 1), '') from auth.users au where au.id = target_user_id),
+    'User'
+  );
+$$;
+
+create or replace function ensure_trip_member_record(
+  p_trip_id uuid,
+  p_user_id uuid default null
+)
+returns uuid
+language plpgsql
+security definer
 set search_path = public
 as $$
-  select exists (
-    select 1
-    from trip_memberships tm
-    where tm.trip_id = target_trip_id
-      and tm.user_id = auth.uid()
-      and tm.role = 'owner'
-  );
+declare
+  effective_user_id uuid;
+  effective_name text;
+  fallback_name text;
+  member_row_id uuid;
+begin
+  effective_user_id := coalesce(p_user_id, auth.uid());
+
+  if effective_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  effective_name := preferred_display_name(effective_user_id);
+  fallback_name := left(effective_name || ' ' || substr(effective_user_id::text, 1, 6), 80);
+
+  begin
+    insert into members (trip_id, user_id, name)
+    values (p_trip_id, effective_user_id, effective_name);
+  exception
+    when unique_violation then
+      begin
+        insert into members (trip_id, user_id, name)
+        values (p_trip_id, effective_user_id, fallback_name);
+      exception
+        when unique_violation then null;
+      end;
+  end;
+
+  select m.id into member_row_id
+  from members m
+  where m.trip_id = p_trip_id and m.user_id = effective_user_id
+  order by m.created_at asc
+  limit 1;
+
+  if member_row_id is not null then
+    update members
+    set user_id = effective_user_id
+    where id = member_row_id
+      and user_id is distinct from effective_user_id;
+  end if;
+
+  return member_row_id;
+end;
+$$;
+
+create or replace function update_my_display_name(p_display_name text)
+returns user_profiles
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid;
+  clean_name text;
+  profile_row user_profiles;
+begin
+  current_user_id := auth.uid();
+
+  if current_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  clean_name := nullif(trim(p_display_name), '');
+  if clean_name is null then
+    raise exception 'Display name is required';
+  end if;
+
+  if length(clean_name) > 80 then
+    raise exception 'Display name is too long';
+  end if;
+
+  insert into user_profiles (user_id, email, display_name, created_at, updated_at)
+  values (
+    current_user_id,
+    (select lower(email) from auth.users where id = current_user_id),
+    clean_name,
+    now(),
+    now()
+  )
+  on conflict (user_id)
+  do update set
+    display_name = clean_name,
+    updated_at = now()
+  returning * into profile_row;
+
+  return profile_row;
+end;
 $$;
 
 create or replace function create_trip_with_owner(trip_name text)
@@ -260,6 +403,8 @@ begin
   values (new_trip.id, current_user_id, 'owner', current_user_id)
   on conflict (trip_id, user_id) do nothing;
 
+  perform ensure_trip_member_record(new_trip.id, current_user_id);
+
   return new_trip;
 end;
 $$;
@@ -284,9 +429,7 @@ begin
   end if;
 
   if exists (
-    select 1
-    from trip_memberships tm
-    where tm.trip_id = p_trip_id
+    select 1 from trip_memberships tm where tm.trip_id = p_trip_id
   ) then
     raise exception 'Trip already has members';
   end if;
@@ -294,6 +437,8 @@ begin
   insert into trip_memberships (trip_id, user_id, role, invited_by)
   values (p_trip_id, current_user_id, 'owner', current_user_id)
   on conflict (trip_id, user_id) do nothing;
+
+  perform ensure_trip_member_record(p_trip_id, current_user_id);
 end;
 $$;
 
@@ -328,14 +473,7 @@ begin
     else 'member'
   end;
 
-  insert into trip_invitations (
-    trip_id,
-    token,
-    invited_email,
-    role,
-    created_by,
-    expires_at
-  )
+  insert into trip_invitations (trip_id, token, invited_email, role, created_by, expires_at)
   values (
     p_trip_id,
     encode(gen_random_bytes(12), 'hex'),
@@ -367,13 +505,11 @@ begin
     raise exception 'Authentication required';
   end if;
 
-  select lower(email)
-  into current_email
+  select lower(email) into current_email
   from auth.users
   where id = current_user_id;
 
-  select *
-  into invite_row
+  select * into invite_row
   from trip_invitations
   where token = trim(p_token)
   for update;
@@ -409,9 +545,10 @@ begin
   do update set role = excluded.role;
 
   update trip_invitations
-  set accepted_at = now(),
-      accepted_by = current_user_id
+  set accepted_at = now(), accepted_by = current_user_id
   where id = invite_row.id;
+
+  perform ensure_trip_member_record(invite_row.trip_id, current_user_id);
 
   return invite_row.trip_id;
 end;
@@ -441,8 +578,7 @@ begin
     raise exception 'Only owner/admin can remove users';
   end if;
 
-  select role
-  into target_role
+  select role into target_role
   from trip_memberships
   where trip_id = p_trip_id and user_id = p_user_id;
 
@@ -451,8 +587,7 @@ begin
   end if;
 
   if target_role = 'owner' then
-    select count(*)
-    into owner_count
+    select count(*) into owner_count
     from trip_memberships
     where trip_id = p_trip_id and role = 'owner';
 
@@ -498,8 +633,7 @@ begin
     else 'member'
   end;
 
-  select role
-  into target_role
+  select role into target_role
   from trip_memberships
   where trip_id = p_trip_id and user_id = p_user_id;
 
@@ -508,8 +642,7 @@ begin
   end if;
 
   if target_role = 'owner' and new_role <> 'owner' then
-    select count(*)
-    into owner_count
+    select count(*) into owner_count
     from trip_memberships
     where trip_id = p_trip_id and role = 'owner';
 
@@ -538,10 +671,10 @@ returns uuid
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $func$
 declare
   current_user_id uuid;
-  expense_id uuid;
+  v_expense_id uuid;
   existing_creator uuid;
   split_sum numeric(12,2);
   split_row jsonb;
@@ -606,34 +739,19 @@ begin
 
   if p_expense_id is null then
     insert into expenses (
-      trip_id,
-      description,
-      amount,
-      paid_by,
-      split_type,
-      expense_date,
-      created_by,
-      updated_by,
-      updated_at
+      trip_id, description, amount, paid_by, split_type,
+      expense_date, created_by, updated_by, updated_at
     )
     values (
-      p_trip_id,
-      trim(p_description),
-      round(p_amount, 2),
-      p_paid_by,
-      p_split_type,
-      p_expense_date,
-      current_user_id,
-      current_user_id,
-      now()
+      p_trip_id, trim(p_description), round(p_amount, 2),
+      p_paid_by, p_split_type, p_expense_date,
+      current_user_id, current_user_id, now()
     )
-    returning id into expense_id;
+    returning id into v_expense_id;
   else
-    select created_by
-    into existing_creator
+    select created_by into existing_creator
     from expenses
-    where id = p_expense_id
-      and trip_id = p_trip_id;
+    where id = p_expense_id and trip_id = p_trip_id;
 
     if existing_creator is null then
       raise exception 'Expense not found';
@@ -653,26 +771,24 @@ begin
         updated_at = now()
     where id = p_expense_id;
 
-    expense_id := p_expense_id;
+    v_expense_id := p_expense_id;
 
     delete from expense_splits
-    where expense_id = p_expense_id;
+    where expense_id = v_expense_id;
   end if;
 
   insert into expense_splits (expense_id, member_id, share_amount)
   select
-    expense_id,
+    v_expense_id,
     (value->>'member_id')::uuid,
     round(coalesce((value->>'share_amount')::numeric, 0), 2)
   from jsonb_array_elements(p_splits);
 
-  return expense_id;
+  return v_expense_id;
 end;
-$$;
+$func$;
 
-create or replace function delete_expense_with_permission(
-  p_expense_id uuid
-)
+create or replace function delete_expense_with_permission(p_expense_id uuid)
 returns void
 language plpgsql
 security definer
@@ -702,10 +818,13 @@ begin
     raise exception 'Only creator or admin can delete this expense';
   end if;
 
-  delete from expenses
-  where id = p_expense_id;
+  delete from expenses where id = p_expense_id;
 end;
 $$;
+
+-- ============================================================
+-- ROW LEVEL SECURITY
+-- ============================================================
 
 alter table trips enable row level security;
 alter table members enable row level security;
@@ -715,6 +834,7 @@ alter table trip_memberships enable row level security;
 alter table trip_invitations enable row level security;
 alter table user_profiles enable row level security;
 
+-- Drop old policies
 drop policy if exists "public read trips" on trips;
 drop policy if exists "public insert trips" on trips;
 drop policy if exists "public read members" on members;
@@ -723,7 +843,6 @@ drop policy if exists "public read expenses" on expenses;
 drop policy if exists "public insert expenses" on expenses;
 drop policy if exists "public read splits" on expense_splits;
 drop policy if exists "public insert splits" on expense_splits;
-
 drop policy if exists "trip members can read trips" on trips;
 drop policy if exists "authenticated cannot direct insert trips" on trips;
 drop policy if exists "trip members can read members" on members;
@@ -745,168 +864,139 @@ drop policy if exists "trip members can read invitations" on trip_invitations;
 drop policy if exists "trip admin can create invitations" on trip_invitations;
 drop policy if exists "trip admin can update invitations" on trip_invitations;
 drop policy if exists "users can read own and group profiles" on user_profiles;
+drop policy if exists "users can insert own profile" on user_profiles;
+drop policy if exists "users can update own profile" on user_profiles;
 
-create policy "trip members can read trips"
-on trips
-for select
-to authenticated
-using (is_trip_member(id) or is_trip_unowned(id));
+-- trips
+create policy "trip members can read trips" on trips
+  for select to authenticated
+  using (is_trip_member(id) or is_trip_unowned(id));
 
-create policy "authenticated cannot direct insert trips"
-on trips
-for insert
-to authenticated
-with check (false);
+create policy "authenticated cannot direct insert trips" on trips
+  for insert to authenticated
+  with check (false);
 
-create policy "trip members can read members"
-on members
-for select
-to authenticated
-using (is_trip_member(trip_id) or is_trip_unowned(trip_id));
+-- members
+create policy "trip members can read members" on members
+  for select to authenticated
+  using (is_trip_member(trip_id) or is_trip_unowned(trip_id));
 
-create policy "trip members can add members"
-on members
-for insert
-to authenticated
-with check (is_trip_member(trip_id));
+create policy "trip members can add members" on members
+  for insert to authenticated
+  with check (is_trip_member(trip_id));
 
-create policy "trip admin can delete members"
-on members
-for delete
-to authenticated
-using (is_trip_admin(trip_id));
+create policy "trip admin can delete members" on members
+  for delete to authenticated
+  using (is_trip_admin(trip_id));
 
-create policy "trip members can read expenses"
-on expenses
-for select
-to authenticated
-using (is_trip_member(trip_id) or is_trip_unowned(trip_id));
+-- expenses
+create policy "trip members can read expenses" on expenses
+  for select to authenticated
+  using (is_trip_member(trip_id) or is_trip_unowned(trip_id));
 
-create policy "trip members can add expenses"
-on expenses
-for insert
-to authenticated
-with check (is_trip_member(trip_id));
+create policy "trip members can add expenses" on expenses
+  for insert to authenticated
+  with check (is_trip_member(trip_id));
 
-create policy "creator or admin can edit expenses"
-on expenses
-for update
-to authenticated
-using (created_by = auth.uid() or is_trip_admin(trip_id))
-with check (is_trip_member(trip_id));
+create policy "creator or admin can edit expenses" on expenses
+  for update to authenticated
+  using (created_by = auth.uid() or is_trip_admin(trip_id))
+  with check (is_trip_member(trip_id));
 
-create policy "creator or admin can delete expenses"
-on expenses
-for delete
-to authenticated
-using (created_by = auth.uid() or is_trip_admin(trip_id));
+create policy "creator or admin can delete expenses" on expenses
+  for delete to authenticated
+  using (created_by = auth.uid() or is_trip_admin(trip_id));
 
-create policy "trip members can read splits"
-on expense_splits
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from expenses e
-    where e.id = expense_splits.expense_id
-      and (is_trip_member(e.trip_id) or is_trip_unowned(e.trip_id))
+-- expense_splits
+create policy "trip members can read splits" on expense_splits
+  for select to authenticated
+  using (
+    exists (
+      select 1 from expenses e
+      where e.id = expense_splits.expense_id
+        and (is_trip_member(e.trip_id) or is_trip_unowned(e.trip_id))
+    )
+  );
+
+create policy "trip members can add splits" on expense_splits
+  for insert to authenticated
+  with check (
+    exists (
+      select 1 from expenses e
+      where e.id = expense_splits.expense_id
+        and is_trip_member(e.trip_id)
+    )
+  );
+
+create policy "creator or admin can edit splits" on expense_splits
+  for update to authenticated
+  using (
+    exists (
+      select 1 from expenses e
+      where e.id = expense_splits.expense_id
+        and (e.created_by = auth.uid() or is_trip_admin(e.trip_id))
+    )
   )
-);
+  with check (
+    exists (
+      select 1 from expenses e
+      where e.id = expense_splits.expense_id
+        and is_trip_member(e.trip_id)
+    )
+  );
 
-create policy "trip members can add splits"
-on expense_splits
-for insert
-to authenticated
-with check (
-  exists (
-    select 1
-    from expenses e
-    where e.id = expense_splits.expense_id
-      and is_trip_member(e.trip_id)
-  )
-);
+create policy "creator or admin can delete splits" on expense_splits
+  for delete to authenticated
+  using (
+    exists (
+      select 1 from expenses e
+      where e.id = expense_splits.expense_id
+        and (e.created_by = auth.uid() or is_trip_admin(e.trip_id))
+    )
+  );
 
-create policy "creator or admin can edit splits"
-on expense_splits
-for update
-to authenticated
-using (
-  exists (
-    select 1
-    from expenses e
-    where e.id = expense_splits.expense_id
-      and (e.created_by = auth.uid() or is_trip_admin(e.trip_id))
-  )
-)
-with check (
-  exists (
-    select 1
-    from expenses e
-    where e.id = expense_splits.expense_id
-      and is_trip_member(e.trip_id)
-  )
-);
+-- trip_memberships
+create policy "trip members can read memberships" on trip_memberships
+  for select to authenticated
+  using (is_trip_member(trip_id));
 
-create policy "creator or admin can delete splits"
-on expense_splits
-for delete
-to authenticated
-using (
-  exists (
-    select 1
-    from expenses e
-    where e.id = expense_splits.expense_id
-      and (e.created_by = auth.uid() or is_trip_admin(e.trip_id))
-  )
-);
+create policy "trip admin can insert memberships" on trip_memberships
+  for insert to authenticated
+  with check (is_trip_admin(trip_id));
 
-create policy "trip members can read memberships"
-on trip_memberships
-for select
-to authenticated
-using (is_trip_member(trip_id));
+create policy "trip owner can update memberships" on trip_memberships
+  for update to authenticated
+  using (is_trip_owner(trip_id))
+  with check (is_trip_owner(trip_id));
 
-create policy "trip admin can insert memberships"
-on trip_memberships
-for insert
-to authenticated
-with check (is_trip_admin(trip_id));
+create policy "trip admin can delete memberships" on trip_memberships
+  for delete to authenticated
+  using (is_trip_admin(trip_id));
 
-create policy "trip owner can update memberships"
-on trip_memberships
-for update
-to authenticated
-using (is_trip_owner(trip_id))
-with check (is_trip_owner(trip_id));
+-- trip_invitations
+create policy "trip members can read invitations" on trip_invitations
+  for select to authenticated
+  using (is_trip_member(trip_id));
 
-create policy "trip admin can delete memberships"
-on trip_memberships
-for delete
-to authenticated
-using (is_trip_admin(trip_id));
+create policy "trip admin can create invitations" on trip_invitations
+  for insert to authenticated
+  with check (is_trip_admin(trip_id));
 
-create policy "trip members can read invitations"
-on trip_invitations
-for select
-to authenticated
-using (is_trip_member(trip_id));
+create policy "trip admin can update invitations" on trip_invitations
+  for update to authenticated
+  using (is_trip_admin(trip_id))
+  with check (is_trip_admin(trip_id));
 
-create policy "trip admin can create invitations"
-on trip_invitations
-for insert
-to authenticated
-with check (is_trip_admin(trip_id));
+-- user_profiles
+create policy "users can read own and group profiles" on user_profiles
+  for select to authenticated
+  using (can_view_user_profile(user_id));
 
-create policy "trip admin can update invitations"
-on trip_invitations
-for update
-to authenticated
-using (is_trip_admin(trip_id))
-with check (is_trip_admin(trip_id));
+create policy "users can insert own profile" on user_profiles
+  for insert to authenticated
+  with check (user_id = auth.uid());
 
-create policy "users can read own and group profiles"
-on user_profiles
-for select
-to authenticated
-using (can_view_user_profile(user_id));
+create policy "users can update own profile" on user_profiles
+  for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
