@@ -7,10 +7,9 @@ create table if not exists trips (
   created_at timestamptz not null default now()
 );
 
-create table if not exists members (
+create table if not exists members (/*  */
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references trips(id) on delete cascade,
-  user_id uuid,
   name text not null,
   created_at timestamptz not null default now(),
   unique (trip_id, name)
@@ -52,7 +51,6 @@ create table if not exists trip_memberships (
 create table if not exists user_profiles (
   user_id uuid primary key,
   email text,
-  display_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -73,13 +71,11 @@ create table if not exists trip_invitations (
 
 alter table trips add column if not exists created_by uuid;
 alter table members add column if not exists trip_id uuid references trips(id) on delete cascade;
-alter table members add column if not exists user_id uuid;
 alter table expenses add column if not exists trip_id uuid references trips(id) on delete cascade;
 alter table expenses add column if not exists expense_date date;
 alter table expenses add column if not exists created_by uuid;
 alter table expenses add column if not exists updated_by uuid;
 alter table expenses add column if not exists updated_at timestamptz;
-alter table user_profiles add column if not exists display_name text;
 
 update members
 set trip_id = '00000000-0000-0000-0000-000000000001'
@@ -96,18 +92,6 @@ where expense_date is null;
 update expenses
 set updated_at = created_at
 where updated_at is null;
-
-update user_profiles up
-set display_name = coalesce(
-  nullif(trim(up.display_name), ''),
-  nullif(trim(au.raw_user_meta_data->>'full_name'), ''),
-  nullif(trim(au.raw_user_meta_data->>'name'), ''),
-  nullif(split_part(lower(au.email), '@', 1), ''),
-  'User'
-)
-from auth.users au
-where up.user_id = au.id
-  and (up.display_name is null or trim(up.display_name) = '');
 
 alter table members alter column trip_id set not null;
 alter table expenses alter column trip_id set not null;
@@ -130,7 +114,6 @@ begin
 end $$;
 
 create index if not exists idx_members_trip_id on members(trip_id);
-create index if not exists idx_members_user_id on members(user_id);
 create index if not exists idx_expenses_trip_id on expenses(trip_id);
 create index if not exists idx_expenses_paid_by on expenses(paid_by);
 create index if not exists idx_expense_splits_expense_id on expense_splits(expense_id);
@@ -140,25 +123,13 @@ create index if not exists idx_trip_memberships_user_id on trip_memberships(user
 create index if not exists idx_user_profiles_email on user_profiles(email);
 create index if not exists idx_trip_invitations_trip_id on trip_invitations(trip_id);
 create index if not exists idx_trip_invitations_token on trip_invitations(token);
-create unique index if not exists idx_members_trip_user_unique on members(trip_id, user_id) where user_id is not null;
 
-insert into user_profiles (user_id, email, display_name, created_at, updated_at)
-select
-  id,
-  lower(email),
-  coalesce(
-    nullif(trim(raw_user_meta_data->>'full_name'), ''),
-    nullif(trim(raw_user_meta_data->>'name'), ''),
-    nullif(split_part(lower(email), '@', 1), ''),
-    'User'
-  ),
-  created_at,
-  now()
+insert into user_profiles (user_id, email, created_at, updated_at)
+select id, lower(email), created_at, now()
 from auth.users
 on conflict (user_id)
 do update set
   email = excluded.email,
-  display_name = coalesce(nullif(user_profiles.display_name, ''), excluded.display_name),
   updated_at = now();
 
 create or replace function sync_user_profile()
@@ -168,23 +139,11 @@ security definer
 set search_path = public, auth
 as $$
 begin
-  insert into public.user_profiles (user_id, email, display_name, created_at, updated_at)
-  values (
-    new.id,
-    lower(new.email),
-    coalesce(
-      nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
-      nullif(trim(new.raw_user_meta_data->>'name'), ''),
-      nullif(split_part(lower(new.email), '@', 1), ''),
-      'User'
-    ),
-    coalesce(new.created_at, now()),
-    now()
-  )
+  insert into public.user_profiles (user_id, email, created_at, updated_at)
+  values (new.id, lower(new.email), coalesce(new.created_at, now()), now())
   on conflict (user_id)
   do update set
     email = excluded.email,
-    display_name = coalesce(nullif(public.user_profiles.display_name, ''), excluded.display_name),
     updated_at = now();
 
   return new;
@@ -277,123 +236,6 @@ as $$
   );
 $$;
 
-create or replace function preferred_display_name(target_user_id uuid)
-returns text
-language sql
-stable
-security definer
-set search_path = public, auth
-as $$
-  select coalesce(
-    (select nullif(trim(up.display_name), '') from user_profiles up where up.user_id = target_user_id),
-    (select nullif(trim(au.raw_user_meta_data->>'full_name'), '') from auth.users au where au.id = target_user_id),
-    (select nullif(trim(au.raw_user_meta_data->>'name'), '') from auth.users au where au.id = target_user_id),
-    (select nullif(split_part(lower(au.email), '@', 1), '') from auth.users au where au.id = target_user_id),
-    'User'
-  );
-$$;
-
-create or replace function ensure_trip_member_record(
-  p_trip_id uuid,
-  p_user_id uuid default null
-)
-returns uuid
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  effective_user_id uuid;
-  effective_name text;
-  fallback_name text;
-  member_row_id uuid;
-begin
-  effective_user_id := coalesce(p_user_id, auth.uid());
-
-  if effective_user_id is null then
-    raise exception 'Authentication required';
-  end if;
-
-  effective_name := preferred_display_name(effective_user_id);
-  fallback_name := left(effective_name || ' ' || substr(effective_user_id::text, 1, 6), 80);
-
-  begin
-    insert into members (trip_id, user_id, name)
-    values (p_trip_id, effective_user_id, effective_name);
-  exception
-    when unique_violation then
-      begin
-        insert into members (trip_id, user_id, name)
-        values (p_trip_id, effective_user_id, fallback_name);
-      exception
-        when unique_violation then
-          null;
-      end;
-  end;
-
-  select m.id
-  into member_row_id
-  from members m
-  where m.trip_id = p_trip_id
-    and m.user_id = effective_user_id
-  order by m.created_at asc
-  limit 1;
-
-  if member_row_id is not null then
-    update members
-    set user_id = effective_user_id
-    where id = member_row_id
-      and user_id is distinct from effective_user_id;
-  end if;
-
-  return member_row_id;
-end;
-$$;
-
-create or replace function update_my_display_name(p_display_name text)
-returns user_profiles
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  current_user_id uuid;
-  clean_name text;
-  profile_row user_profiles;
-begin
-  current_user_id := auth.uid();
-
-  if current_user_id is null then
-    raise exception 'Authentication required';
-  end if;
-
-  clean_name := nullif(trim(p_display_name), '');
-  if clean_name is null then
-    raise exception 'Display name is required';
-  end if;
-
-  if length(clean_name) > 80 then
-    raise exception 'Display name is too long';
-  end if;
-
-  insert into user_profiles (user_id, email, display_name, created_at, updated_at)
-  values (
-    current_user_id,
-    (select lower(email) from auth.users where id = current_user_id),
-    clean_name,
-    now(),
-    now()
-  )
-  on conflict (user_id)
-  do update set
-    display_name = clean_name,
-    updated_at = now()
-  returning * into profile_row;
-
-  return profile_row;
-end;
-$$;
-
 create or replace function create_trip_with_owner(trip_name text)
 returns trips
 language plpgsql
@@ -417,8 +259,6 @@ begin
   insert into trip_memberships (trip_id, user_id, role, invited_by)
   values (new_trip.id, current_user_id, 'owner', current_user_id)
   on conflict (trip_id, user_id) do nothing;
-
-  perform ensure_trip_member_record(new_trip.id, current_user_id);
 
   return new_trip;
 end;
@@ -454,8 +294,6 @@ begin
   insert into trip_memberships (trip_id, user_id, role, invited_by)
   values (p_trip_id, current_user_id, 'owner', current_user_id)
   on conflict (trip_id, user_id) do nothing;
-
-  perform ensure_trip_member_record(p_trip_id, current_user_id);
 end;
 $$;
 
@@ -574,8 +412,6 @@ begin
   set accepted_at = now(),
       accepted_by = current_user_id
   where id = invite_row.id;
-
-  perform ensure_trip_member_record(invite_row.trip_id, current_user_id);
 
   return invite_row.trip_id;
 end;
@@ -909,8 +745,6 @@ drop policy if exists "trip members can read invitations" on trip_invitations;
 drop policy if exists "trip admin can create invitations" on trip_invitations;
 drop policy if exists "trip admin can update invitations" on trip_invitations;
 drop policy if exists "users can read own and group profiles" on user_profiles;
-drop policy if exists "users can insert own profile" on user_profiles;
-drop policy if exists "users can update own profile" on user_profiles;
 
 create policy "trip members can read trips"
 on trips
@@ -1076,18 +910,3 @@ on user_profiles
 for select
 to authenticated
 using (can_view_user_profile(user_id));
-
-create policy "users can insert own profile"
-on user_profiles
-for insert
-to authenticated
-with check (user_id = auth.uid());
-
-create policy "users can update own profile"
-on user_profiles
-for update
-to authenticated
-using (user_id = auth.uid())
-with check (user_id = auth.uid());
-
-notify pgrst, 'reload schema';
