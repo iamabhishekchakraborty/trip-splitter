@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function InviteAcceptPanel({ disabled, onAcceptInvite }) {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-  const [autoSubmitted, setAutoSubmitted] = useState(false);
+  const autoSubmittedRef = useRef(false); // ref instead of state — synchronous, no re-render race
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -14,8 +14,8 @@ export default function InviteAcceptPanel({ disabled, onAcceptInvite }) {
   }, []);
 
   useEffect(() => {
-    if (!token || disabled || autoSubmitted) return;
-    setAutoSubmitted(true);
+    if (!token || disabled || autoSubmittedRef.current) return;
+    autoSubmittedRef.current = true; // set synchronously before any async work
     handleAccept(token);
   }, [token, disabled]);
 
@@ -26,7 +26,6 @@ export default function InviteAcceptPanel({ disabled, onAcceptInvite }) {
     try {
       await onAcceptInvite(trimmed);
       setToken('');
-      // Clean the URL after successful accept
       const url = new URL(window.location.href);
       url.searchParams.delete('invite');
       window.history.replaceState({}, '', url.toString());

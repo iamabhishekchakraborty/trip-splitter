@@ -108,6 +108,7 @@ export default function App() {
   const [expenses, setExpenses] = useState([]);
   const [groupMemberships, setGroupMemberships] = useState([]);
   const [groupInvites, setGroupInvites] = useState([]);
+  const [groupPastInvites, setGroupPastInvites] = useState([]);
   const [membershipByTrip, setMembershipByTrip] = useState({});
   const [session, setSession] = useState(null);
   const [currentProfile, setCurrentProfile] = useState(null);
@@ -131,6 +132,7 @@ export default function App() {
     setExpenses([]);
     setGroupMemberships([]);
     setGroupInvites([]);
+    setGroupPastInvites([]);
   }
 
   function buildTripSummaries(tripsData, membersData, expensesData, myMembershipRows) {
@@ -308,7 +310,7 @@ export default function App() {
       activeTrip = tripData;
     }
 
-    const [membersRes, expensesRes, membershipsRes, invitesRes] = await Promise.all([
+    const [membersRes, expensesRes, membershipsRes, invitesRes, pastInvitesRes] = await Promise.all([
       supabase.from('members').select('*').eq('trip_id', tripId).order('created_at', { ascending: true }),
       supabase
         .from('expenses')
@@ -317,13 +319,24 @@ export default function App() {
         .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('trip_memberships').select('trip_id, user_id, role, created_at').eq('trip_id', tripId),
+      // Active invites: not used, not expired
       supabase
         .from('trip_invitations')
         .select('id, token, invited_email, role, created_at, expires_at, accepted_at')
         .eq('trip_id', tripId)
         .is('revoked_at', null)
+        .is('accepted_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false }),
+      // Past invites: used or expired, capped at 5
+      supabase
+        .from('trip_invitations')
+        .select('id, token, invited_email, role, created_at, expires_at, accepted_at')
+        .eq('trip_id', tripId)
+        .is('revoked_at', null)
+        .or(`accepted_at.not.is.null,expires_at.lte.${new Date().toISOString()}`)
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(5)
     ]);
 
     const firstError = membersRes.error || expensesRes.error;
@@ -345,8 +358,15 @@ export default function App() {
       return;
     }
 
+    if (pastInvitesRes.error && !isSchemaCacheError(pastInvitesRes.error)) {
+      setError(getFriendlyErrorMessage(pastInvitesRes.error));
+      setLoading(false);
+      return;
+    }
+
     const membershipRows = membershipsRes.error ? [] : (membershipsRes.data || []);
     const inviteRows = invitesRes.error ? [] : (invitesRes.data || []);
+    const pastInviteRows = pastInvitesRes.error ? [] : (pastInvitesRes.data || []);
     const myMembership = membershipRows.find((item) => item.user_id === session.user.id);
     let effectiveMembers = membersRes.data || [];
 
@@ -469,6 +489,7 @@ export default function App() {
     setExpenses(normalizedExpenses);
     setGroupMemberships(enrichedMemberships);
     setGroupInvites(inviteRows);
+    setGroupPastInvites(pastInviteRows);
     if (myMembership) {
       setMembershipByTrip((current) => ({ ...current, [tripId]: myMembership.role }));
     } else if (membershipsRes.error) {
@@ -527,9 +548,14 @@ export default function App() {
     setError('');
     setInfo('');
 
+    // Preserve ?invite= token through the magic link redirect so auto-join works after sign-in
+    const redirectTo = new URL(window.location.origin);
+    const inviteToken = new URLSearchParams(window.location.search).get('invite');
+    if (inviteToken) redirectTo.searchParams.set('invite', inviteToken);
+
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin }
+      options: { emailRedirectTo: redirectTo.toString() }
     });
 
     if (otpError) {
@@ -741,6 +767,13 @@ export default function App() {
     });
 
     if (inviteError) {
+      const msg = inviteError.message || '';
+      // Already used — user is already a member, navigate them in silently
+      if (msg.includes('already used') || msg.includes('already accepted')) {
+        setInfo('You have already joined this group.');
+        await loadHomeData();
+        return;
+      }
       setError(getFriendlyErrorMessage(inviteError));
       return;
     }
@@ -999,6 +1032,7 @@ export default function App() {
                   isAdmin={isAdmin}
                   memberships={groupMemberships}
                   invites={groupInvites}
+                  pastInvites={groupPastInvites}
                   onCreateInvite={handleCreateInvite}
                   onRemoveMember={handleRemoveTripMember}
                   onUpdateRole={handleUpdateRole}
