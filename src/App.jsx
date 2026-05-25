@@ -350,7 +350,7 @@ export default function App() {
     const myMembership = membershipRows.find((item) => item.user_id === session.user.id);
     let effectiveMembers = membersRes.data || [];
 
-    if (myMembership || membershipsRes.error) {
+    if (!myMembership && !membershipsRes.error) {
       const ensured = await ensureCurrentUserMember(tripId);
       if (!ensured) {
         setLoading(false);
@@ -635,7 +635,12 @@ export default function App() {
   async function handleUpdateDisplayName(displayName) {
     if (isLocalMode || !session?.user) return;
 
-    const { data: profileRows, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await supabase
+      .rpc('update_my_display_name', { p_display_name: displayName })
+      .single();
+
+
+    /* const { data: profileRows, error: profileError } = await supabase
       .from('user_profiles')
       .upsert({
         user_id: session.user.id,
@@ -643,7 +648,7 @@ export default function App() {
         display_name: displayName
       }, { onConflict: 'user_id', ignoreDuplicates: false })
       .select('user_id, email, display_name')
-      .limit(1);
+      .limit(1); */
 
     if (profileError) {
       const profileMessage = getFriendlyErrorMessage(profileError);
