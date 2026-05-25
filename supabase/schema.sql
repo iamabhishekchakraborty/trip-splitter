@@ -451,7 +451,7 @@ create or replace function create_trip_invitation(
 returns trip_invitations
 language plpgsql
 security definer
-set search_path = public
+SET search_path = public, extensions
 as $$
 declare
   current_user_id uuid;

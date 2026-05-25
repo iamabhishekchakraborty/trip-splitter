@@ -1,7 +1,7 @@
 export default function GroupHeader({ tripName, totalSpent, role, onBack }) {
   return (
     <section className="group-header card">
-      <button className="secondary-button" type="button" onClick={onBack}>Back to groups</button>
+      <button className="secondary-button" type="button" onClick={onBack}>← All groups</button>
       <div>
         <p className="eyebrow">Active group</p>
         <h2>{tripName}</h2>

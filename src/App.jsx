@@ -635,20 +635,9 @@ export default function App() {
   async function handleUpdateDisplayName(displayName) {
     if (isLocalMode || !session?.user) return;
 
-      const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .rpc('update_my_display_name', { p_display_name: displayName })
       .single();
-
-
-    /* const { data: profileRows, error: profileError } = await supabase
-      .from('user_profiles')
-      .upsert({
-        user_id: session.user.id,
-        email: (currentProfile?.email || session.user.email || '').toLowerCase(),
-        display_name: displayName
-      }, { onConflict: 'user_id', ignoreDuplicates: false })
-      .select('user_id, email, display_name')
-      .limit(1); */
 
     if (profileError) {
       const profileMessage = getFriendlyErrorMessage(profileError);
@@ -669,8 +658,6 @@ export default function App() {
         return;
       }
     }
-
-    const profile = Array.isArray(profileRows) ? profileRows[0] : profileRows;
 
     if (profile) {
       setCurrentProfile({
@@ -889,7 +876,7 @@ export default function App() {
     }
 
     setError('');
-    const { error: inviteError } = await supabase.rpc('create_trip_invitation', {
+    const { data: newInvite, error: inviteError } = await supabase.rpc('create_trip_invitation', {
       p_trip_id: selectedTripId,
       p_invited_email: invited_email,
       p_role: role
@@ -898,6 +885,11 @@ export default function App() {
     if (inviteError) {
       setError(getFriendlyErrorMessage(inviteError));
       return;
+    }
+
+    if (newInvite?.token) {
+      const inviteUrl = `${window.location.origin}${window.location.pathname}?invite=${newInvite.token}`;
+      setInfo(`Invite link created: ${inviteUrl}`);
     }
 
     await loadTripData(selectedTripId);

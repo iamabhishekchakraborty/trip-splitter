@@ -131,15 +131,28 @@ export default function GroupAccessPanel({
 
       <div className="stack compact">
         <p className="eyebrow">Recent invites</p>
-        {invites.length ? invites.map((invite) => (
-          <article key={invite.id} className="subdued-panel stack compact">
-            <strong>{invite.token}</strong>
-            <p className="muted">Role: {invite.role}</p>
-            <p className="muted">Email: {invite.invited_email || 'Any authenticated user'}</p>
-            <p className="muted">Expires: {formatDateTime(invite.expires_at)}</p>
-            <p className="muted">Used: {invite.accepted_at ? formatDateTime(invite.accepted_at) : 'No'}</p>
-          </article>
-        )) : <p className="muted">No invites yet.</p>}
+        {invites.length ? invites.map((invite) => {
+          const inviteUrl = `${window.location.origin}${window.location.pathname}?invite=${invite.token}`;
+          return (
+            <article key={invite.id} className="subdued-panel stack compact">
+              <p className="eyebrow">Invite link</p>
+              <div className="inline-form">
+                <input readOnly value={inviteUrl} style={{ fontSize: '0.8rem' }} />
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => navigator.clipboard.writeText(inviteUrl)}
+                >
+                  Copy
+                </button>
+              </div>
+              <p className="muted">Role: {invite.role}</p>
+              <p className="muted">Email: {invite.invited_email || 'Any authenticated user'}</p>
+              <p className="muted">Expires: {formatDateTime(invite.expires_at)}</p>
+              <p className="muted">Used: {invite.accepted_at ? formatDateTime(invite.accepted_at) : 'No'}</p>
+            </article>
+          );
+        }) : <p className="muted">No invites yet.</p>}
       </div>
     </section>
   );
