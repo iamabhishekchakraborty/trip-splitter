@@ -11,7 +11,7 @@ export default function BalancesPanel({ balances, settlements }) {
             <div className="row between" key={member.id}>
               <span>{member.name}</span>
               <strong className={member.balance >= 0 ? 'positive' : 'negative'}>
-                ₹{member.balance.toFixed(2)}
+                INR {member.balance.toFixed(2)}
               </strong>
             </div>
           ))}
@@ -28,7 +28,7 @@ export default function BalancesPanel({ balances, settlements }) {
               <span>{item.from}</span>
               <span>pays</span>
               <span>{item.to}</span>
-              <strong>₹{item.amount.toFixed(2)}</strong>
+              <strong>INR {item.amount.toFixed(2)}</strong>
             </div>
           )) : <p className="muted">Everyone is settled.</p>}
         </div>

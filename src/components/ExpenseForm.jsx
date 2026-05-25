@@ -9,7 +9,7 @@ function getTodayInputValue() {
   return `${year}-${month}-${day}`;
 }
 
-export default function ExpenseForm({ members, onAddExpense }) {
+export default function ExpenseForm({ members, onAddExpense, canAddExpenses }) {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [expenseDate, setExpenseDate] = useState(getTodayInputValue);
@@ -68,6 +68,11 @@ export default function ExpenseForm({ members, onAddExpense }) {
     e.preventDefault();
     setFormError('');
 
+    if (!canAddExpenses) {
+      setFormError('Join or claim this group before adding expenses.');
+      return;
+    }
+
     if (!description || !amount || !expenseDate || !paidBy || !members.length) return;
 
     if (!selectedMemberIds.length) {
@@ -102,31 +107,53 @@ export default function ExpenseForm({ members, onAddExpense }) {
         <h2>Log a payment</h2>
       </div>
       <form className="stack" onSubmit={handleSubmit}>
+        {!members.length ? (
+          <p className="muted">
+            No trip members yet. Add at least one member before logging expenses.
+          </p>
+        ) : null}
         <label>
           <span>Description</span>
-          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Cab from airport" />
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Cab from airport"
+            disabled={!canAddExpenses || !members.length}
+          />
         </label>
         <div className="split-grid two">
           <label>
             <span>Amount</span>
-            <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1800" />
+            <input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="1800"
+              disabled={!canAddExpenses || !members.length}
+            />
           </label>
           <label>
             <span>Expense date</span>
-            <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={(e) => setExpenseDate(e.target.value)}
+              disabled={!canAddExpenses || !members.length}
+            />
           </label>
         </div>
         <div className="split-grid two">
           <label>
             <span>Paid by</span>
-            <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+            <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)} disabled={!canAddExpenses || !members.length}>
               {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
             </select>
           </label>
         </div>
         <label>
           <span>Split type</span>
-          <select value={splitType} onChange={(e) => setSplitType(e.target.value)}>
+          <select value={splitType} onChange={(e) => setSplitType(e.target.value)} disabled={!canAddExpenses || !members.length}>
             <option value="equal">Equal</option>
             <option value="manual">Manual</option>
           </select>
@@ -142,6 +169,7 @@ export default function ExpenseForm({ members, onAddExpense }) {
                 <input
                   type="checkbox"
                   checked={selectedMemberIds.includes(member.id)}
+                  disabled={!canAddExpenses || !members.length}
                   onChange={() => toggleSplitMember(member.id)}
                 />
                 <span>{member.name}</span>
@@ -160,6 +188,7 @@ export default function ExpenseForm({ members, onAddExpense }) {
                     type="number"
                     step="0.01"
                     value={split?.share_amount ?? ''}
+                    disabled={!canAddExpenses || !members.length}
                     onChange={(e) => updateManualShare(member.id, e.target.value)}
                     placeholder="0"
                   />
@@ -169,7 +198,8 @@ export default function ExpenseForm({ members, onAddExpense }) {
           </div>
         )}
         {formError ? <p className="form-error">{formError}</p> : null}
-        <button type="submit">Save expense</button>
+        <button type="submit" disabled={!canAddExpenses || !members.length}>Save expense</button>
+        {!canAddExpenses ? <p className="muted">Only active group users can add expenses.</p> : null}
       </form>
     </section>
   );

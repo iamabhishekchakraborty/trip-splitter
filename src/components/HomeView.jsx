@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function HomeView({ trips, onAddTrip, onOpenTrip }) {
+export default function HomeView({ trips, onAddTrip, onOpenTrip, onClaimTrip, canCreateTrips }) {
   const [name, setName] = useState('');
 
   async function handleSubmit(e) {
@@ -18,9 +18,15 @@ export default function HomeView({ trips, onAddTrip, onOpenTrip }) {
           <h2>Create trip group</h2>
         </div>
         <form className="inline-form" onSubmit={handleSubmit}>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Goa2026" />
-          <button type="submit">Create</button>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Goa2026"
+            disabled={!canCreateTrips}
+          />
+          <button type="submit" disabled={!canCreateTrips}>Create</button>
         </form>
+        {!canCreateTrips ? <p className="muted">Sign in to create a new group.</p> : null}
       </section>
 
       <section className="stack">
@@ -30,16 +36,27 @@ export default function HomeView({ trips, onAddTrip, onOpenTrip }) {
         </div>
         <div className="trip-grid">
           {trips.length ? trips.map((trip) => (
-            <button className="trip-tile" type="button" key={trip.id} onClick={() => onOpenTrip(trip.id)}>
+            <article className="trip-tile" key={trip.id}>
               <span>
                 <strong>{trip.name}</strong>
-                <small>{trip.memberCount} members · {trip.expenseCount} expenses</small>
+                <small>{trip.memberCount} members - {trip.expenseCount} expenses</small>
+                <small>{trip.accessRole ? `Your role: ${trip.accessRole}` : 'Unclaimed group'}</small>
               </span>
               <span className="trip-total">
                 <small>Total spent</small>
-                <strong>₹{Number(trip.totalSpent || 0).toFixed(2)}</strong>
+                <strong>INR {Number(trip.totalSpent || 0).toFixed(2)}</strong>
               </span>
-            </button>
+              <div className="row wrap-gap">
+                <button className="secondary-button" type="button" onClick={() => onOpenTrip(trip.id)}>
+                  Open
+                </button>
+                {!trip.accessRole ? (
+                  <button className="secondary-button" type="button" onClick={() => onClaimTrip(trip.id)}>
+                    Claim ownership
+                  </button>
+                ) : null}
+              </div>
+            </article>
           )) : (
             <div className="card">
               <p className="muted">No groups yet. Create your first trip group.</p>

@@ -38,6 +38,10 @@ body {
 }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
 input, select {
   width: 100%;
   padding: 0.82rem 0.95rem;
@@ -66,6 +70,21 @@ label { display: grid; gap: 0.45rem; font-size: var(--text-sm); }
 }
 .topbar, .grid-panel, .main-grid { display: grid; gap: var(--space-4); }
 .topbar { align-items: start; }
+.account-slot { justify-self: stretch; }
+.account-compact {
+  display: grid;
+  gap: var(--space-3);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+.account-compact strong { font-size: var(--text-base); }
+.account-compact .inline-form {
+  display: grid;
+  gap: var(--space-3);
+}
+.account-compact .inline-form label { width: 100%; }
 .eyebrow {
   margin: 0 0 var(--space-2);
   color: var(--color-primary);
@@ -111,6 +130,21 @@ h2 { font-size: var(--text-lg); }
   min-height: 44px;
 }
 .secondary-button:hover { border-color: rgba(1, 105, 111, 0.35); }
+.danger-button {
+  width: fit-content;
+  background: rgba(154, 46, 46, 0.12);
+  color: var(--color-negative);
+  border: 1px solid rgba(154, 46, 46, 0.26);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.9rem;
+  min-height: 44px;
+}
+.danger-button:hover { background: rgba(154, 46, 46, 0.18); }
+.secondary-button.small,
+.danger-button.small {
+  min-height: 34px;
+  padding: 0.4rem 0.62rem;
+}
 .chip-row { flex-wrap: wrap; }
 .chip {
   background: rgba(1, 105, 111, 0.1);
@@ -153,6 +187,9 @@ h2 { font-size: var(--text-lg); }
   border-color: rgba(1, 105, 111, 0.35);
   transform: translateY(-1px);
 }
+.trip-tile .row {
+  justify-content: flex-start;
+}
 .trip-tile span,
 .trip-total {
   display: grid;
@@ -181,6 +218,7 @@ h2 { font-size: var(--text-lg); }
 }
 .between { justify-content: space-between; align-items: center; }
 .wrap-gap { flex-wrap: wrap; }
+.align-end-text { justify-items: end; text-align: right; }
 .positive { color: var(--color-positive); }
 .negative { color: var(--color-negative); }
 .settlement {
@@ -238,4 +276,8 @@ h2 { font-size: var(--text-lg); }
   .grid-panel { grid-template-columns: 1fr 1fr; }
   .split-grid.two { grid-template-columns: 1fr 1fr; }
   .check-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .account-compact .inline-form {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
 }

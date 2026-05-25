@@ -183,3 +183,37 @@ export function addLocalExpense(tripId, payload) {
     expenses: [expense, ...data.expenses]
   });
 }
+
+export function updateLocalExpense(tripId, expenseId, payload) {
+  const data = readData();
+  const updatedExpenses = data.expenses.map((expense) => {
+    if (expense.id !== expenseId || expense.trip_id !== tripId) return expense;
+
+    return {
+      ...expense,
+      description: payload.description,
+      amount: Number(payload.amount),
+      paid_by: payload.paid_by,
+      split_type: payload.split_type,
+      expense_date: payload.expense_date,
+      updated_at: new Date().toISOString(),
+      splits: payload.splits.map((split) => ({
+        member_id: split.member_id,
+        share_amount: Number(split.share_amount)
+      }))
+    };
+  });
+
+  writeData({
+    ...data,
+    expenses: updatedExpenses
+  });
+}
+
+export function deleteLocalExpense(tripId, expenseId) {
+  const data = readData();
+  writeData({
+    ...data,
+    expenses: data.expenses.filter((expense) => !(expense.id === expenseId && expense.trip_id === tripId))
+  });
+}
