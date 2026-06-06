@@ -1,15 +1,23 @@
-export default function BalancesPanel({ balances, settlements }) {
+export default function BalancesPanel({ memberSummary, settlements }) {
   return (
     <section className="grid-panel">
       <article className="card stack">
         <div>
-          <p className="eyebrow">Balances</p>
-          <h2>Net position</h2>
+          <p className="eyebrow">Member summary</p>
+          <h2>Who paid what</h2>
         </div>
         <div className="stack compact">
-          {balances.map((member) => (
-            <div className="row between" key={member.id}>
+          <div className="summary-header">
+            <span>Member</span>
+            <span>Paid</span>
+            <span>Share</span>
+            <span>Net position</span>
+          </div>
+          {memberSummary.map((member) => (
+            <div className="summary-row" key={member.id}>
               <span>{member.name}</span>
+              <span>INR {member.paid.toFixed(2)}</span>
+              <span>INR {member.share.toFixed(2)}</span>
               <strong className={member.balance >= 0 ? 'positive' : 'negative'}>
                 INR {member.balance.toFixed(2)}
               </strong>

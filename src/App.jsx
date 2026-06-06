@@ -10,7 +10,8 @@ import BalancesPanel from './components/BalancesPanel';
 import ExpensesList from './components/ExpensesList';
 import GroupAccessPanel from './components/GroupAccessPanel';
 import { hasSupabaseConfig, supabase } from './lib/supabase';
-import { computeBalances, simplifySettlements } from './lib/balances';
+import { computeMemberSummary, simplifySettlements } from './lib/balances';
+import { downloadExpensesCsv, downloadSummaryCsv, exportTripReportPdf } from './lib/exports';
 import {
   addLocalExpense,
   addLocalMember,
@@ -901,6 +902,58 @@ export default function App() {
     await loadTripData(selectedTripId);
   }
 
+  function handleDownloadDetailedCsv() {
+    if (!expenses.length) {
+      setInfo('Add at least one expense before downloading the detailed CSV.');
+      return;
+    }
+
+    downloadExpensesCsv({
+      tripName: selectedTrip?.name || 'Trip group',
+      expenses,
+      members
+    });
+    setInfo('Detailed expense CSV downloaded.');
+  }
+
+  function handleDownloadSummaryCsv() {
+    if (!memberSummary.length) {
+      setInfo('Add at least one member before downloading the summary CSV.');
+      return;
+    }
+
+    downloadSummaryCsv({
+      tripName: selectedTrip?.name || 'Trip group',
+      totalSpent,
+      memberSummary,
+      settlements
+    });
+    setInfo('Settlement summary CSV downloaded.');
+  }
+
+  function handleExportPdf() {
+    if (!memberSummary.length && !expenses.length) {
+      setInfo('Add members or expenses before exporting the PDF.');
+      return;
+    }
+
+    const didOpen = exportTripReportPdf({
+      tripName: selectedTrip?.name || 'Trip group',
+      totalSpent,
+      memberSummary,
+      settlements,
+      expenses,
+      members
+    });
+
+    if (!didOpen) {
+      setError('Allow pop-ups for this site to export the PDF.');
+      return;
+    }
+
+    setInfo('Print dialog opened for the PDF report. Choose "Save as PDF" to download it.');
+  }
+
   async function handleCreateInvite({ invited_email, role }) {
     if (!selectedTripId || isLocalMode) return;
     if (!isAdmin) {
@@ -971,7 +1024,11 @@ export default function App() {
     await loadTripData(selectedTripId);
   }
 
-  const balances = useMemo(() => computeBalances(members, expenses), [members, expenses]);
+  const memberSummary = useMemo(() => computeMemberSummary(members, expenses), [members, expenses]);
+  const balances = useMemo(
+    () => memberSummary.map((member) => ({ ...member, balance: member.balance })),
+    [memberSummary]
+  );
   const settlements = useMemo(() => simplifySettlements(balances), [balances]);
   const totalSpent = useMemo(() => expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0), [expenses]);
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member.name])), [members]);
@@ -1015,6 +1072,12 @@ export default function App() {
                 totalSpent={totalSpent}
                 role={currentRole}
                 onBack={loadHomeData}
+                onDownloadDetailedCsv={handleDownloadDetailedCsv}
+                onDownloadSummaryCsv={handleDownloadSummaryCsv}
+                onExportPdf={handleExportPdf}
+                canDownloadDetailedCsv={expenses.length > 0}
+                canDownloadSummaryCsv={memberSummary.length > 0}
+                canExportPdf={memberSummary.length > 0 || expenses.length > 0}
               />
               {!isLocalMode && !currentRole ? (
                 <div className="info-banner">
@@ -1038,7 +1101,7 @@ export default function App() {
                   onUpdateRole={handleUpdateRole}
                 />
               ) : null}
-              <BalancesPanel balances={balances} settlements={settlements} />
+              <BalancesPanel memberSummary={memberSummary} settlements={settlements} />
               <ExpensesList
                 expenses={expenses}
                 members={members}
