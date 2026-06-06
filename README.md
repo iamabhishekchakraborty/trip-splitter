@@ -9,6 +9,8 @@ This iteration upgrades the MVP with:
 - Invitation-based group onboarding
 - User removal and role management
 - Expense edit and delete support
+- Per-member paid/share/net summary
+- Detailed CSV, summary CSV, and PDF exports
 
 ## What is included
 
@@ -22,8 +24,27 @@ This iteration upgrades the MVP with:
 - Group-level invitation flow with token acceptance
 - Owner/admin controls for membership and roles
 - Expense create/edit/delete flows
+- Per-member summary showing paid, share, and net position
+- Suggested transfer settlements
+- Export options:
+  - Settlement CSV with total spent, member paid/share/net values, and suggested transfers
+  - Expense CSV with one row per expense and readable split details
+  - PDF report with total spent, member summary, suggested transfers, and expense details
 - Automatic creator/joiner member record so expense form works immediately
 - User-friendly display names (with editable profile name)
+
+## How exports work
+
+- `Settlement CSV`
+  - Best for sharing how the group should settle up.
+  - Contains trip total, one row per member with `paid`, `share`, `net`, and settlement status, plus suggested transfers.
+- `Expense CSV`
+  - Best for reviewing what made up the total.
+  - Contains one row per expense with payer, split method, readable split details, and timestamps.
+- `PDF`
+  - Best for sharing a complete trip snapshot with the group.
+  - Includes total spent, member summary, suggested transfers, and detailed expense history.
+  - Opens the browser print dialog; choose `Save as PDF` to download.
 
 ## Local setup
 
@@ -231,9 +252,33 @@ Consider Supabase Pro and/or Vercel Pro when one or more conditions are consiste
 3. Add members and expenses.
 4. Edit an expense and confirm balances update.
 5. Delete an expense and confirm balances update.
-6. Create invite token from owner/admin account.
-7. Accept invite from another account and confirm restricted visibility.
-8. Remove a user as owner/admin and confirm access revocation.
+6. Download detailed CSV, summary CSV, and PDF export.
+7. Create invite token from owner/admin account.
+8. Accept invite from another account and confirm restricted visibility.
+9. Remove a user as owner/admin and confirm access revocation.
+
+## Local testing flow
+
+1. Start the app locally with `npm run dev`.
+2. Open `http://127.0.0.1:5173`.
+3. Create or open a trip.
+4. Add 2-3 members.
+5. Add at least one equal split expense and one manual split expense.
+6. Confirm the member summary shows `paid`, `share`, and `net`.
+7. Confirm suggested transfers update correctly.
+8. Download `Settlement CSV` and verify member totals plus suggested transfers.
+9. Download `Expense CSV` and verify one row per expense with readable split details.
+10. Export `PDF` and confirm it includes total spent, member summary, suggested transfers, and expense details.
+
+## Release checklist
+
+1. Confirm the feature scope and update docs/screenshots if needed.
+2. Run local verification for the affected flows.
+3. Run `npm run build` and fix any build issues before pushing.
+4. Open a PR with a clear summary of user-visible changes.
+5. Merge after review/approval.
+6. Verify the deployed app behavior in the real environment.
+7. Smoke-test the key path again after deploy if the change affects shared/group flows.
 
 ## End-to-end test plan (recommended run order)
 
@@ -260,21 +305,27 @@ Use at least two user accounts: `owner_user` and `member_user`.
    - Delete one expense.
    - Confirm history and totals are consistent.
 
-5. Invitation flow
+5. Summary + export checks
+   - Confirm per-member paid/share/net summary matches current expenses.
+   - Download detailed CSV and verify participant split rows.
+   - Download summary CSV and verify paid/share/net values.
+   - Export PDF and verify it includes total spent, member summary, suggested transfers, and expense details.
+
+6. Invitation flow
    - Create invite from `owner_user`.
    - Sign in as `member_user` and accept invite token.
    - Confirm `member_user` can view group and add expense.
 
-6. Role controls
+7. Role controls
    - As `owner_user`, promote `member_user` to `admin`.
    - Confirm `admin` can create invites/remove users.
    - Confirm only `owner` can change roles.
 
-7. Access revocation
+8. Access revocation
    - Remove `member_user` from the group.
    - Confirm `member_user` loses access after refresh/re-login.
 
-8. Guardrail checks
+9. Guardrail checks
    - Verify no direct unauthorized cross-group data access.
    - Verify unclaimed seed group behavior and ownership claim flow.
    - Verify local mode still works when Supabase env vars are absent.

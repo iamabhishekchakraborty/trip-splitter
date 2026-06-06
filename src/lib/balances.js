@@ -1,16 +1,42 @@
-export function computeBalances(members, expenses) {
-  const balanceMap = Object.fromEntries(members.map((member) => [member.id, 0]));
+export function computeMemberSummary(members, expenses) {
+  const summaryMap = Object.fromEntries(
+    members.map((member) => [member.id, { paid: 0, share: 0 }])
+  );
 
   expenses.forEach((expense) => {
-    balanceMap[expense.paid_by] = (balanceMap[expense.paid_by] || 0) + Number(expense.amount);
+    const amount = Number(expense.amount || 0);
+    if (!summaryMap[expense.paid_by]) {
+      summaryMap[expense.paid_by] = { paid: 0, share: 0 };
+    }
+    summaryMap[expense.paid_by].paid += amount;
+
     expense.splits.forEach((split) => {
-      balanceMap[split.member_id] = (balanceMap[split.member_id] || 0) - Number(split.share_amount);
+      const shareAmount = Number(split.share_amount || 0);
+      if (!summaryMap[split.member_id]) {
+        summaryMap[split.member_id] = { paid: 0, share: 0 };
+      }
+      summaryMap[split.member_id].share += shareAmount;
     });
   });
 
-  return members.map((member) => ({
+  return members.map((member) => {
+    const summary = summaryMap[member.id] || { paid: 0, share: 0 };
+    const paid = Number(summary.paid.toFixed(2));
+    const share = Number(summary.share.toFixed(2));
+
+    return {
+      ...member,
+      paid,
+      share,
+      balance: Number((paid - share).toFixed(2))
+    };
+  });
+}
+
+export function computeBalances(members, expenses) {
+  return computeMemberSummary(members, expenses).map((member) => ({
     ...member,
-    balance: Number((balanceMap[member.id] || 0).toFixed(2))
+    balance: Number(member.balance.toFixed(2))
   }));
 }
 
