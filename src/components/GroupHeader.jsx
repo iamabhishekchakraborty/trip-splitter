@@ -8,11 +8,12 @@ export default function GroupHeader({
   onExportPdf,
   canDownloadDetailedCsv,
   canDownloadSummaryCsv,
-  canExportPdf
+  canExportPdf,
+  pdfExporting
 }) {
   return (
     <section className="group-header card">
-      <button className="secondary-button" type="button" onClick={onBack}>Back to groups</button>
+      <button className="secondary-button" type="button" onClick={onBack}>← All groups</button>
       <div>
         <p className="eyebrow">Active group</p>
         <h2>{tripName}</h2>
@@ -23,20 +24,30 @@ export default function GroupHeader({
         <strong>INR {totalSpent.toFixed(2)}</strong>
         <div className="export-actions" aria-label="Export trip report">
           <span className="export-label">Export report</span>
-          <button className="secondary-button" type="button" onClick={onDownloadSummaryCsv} disabled={!canDownloadSummaryCsv}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onDownloadSummaryCsv}
+            disabled={!canDownloadSummaryCsv}
+          >
             Settlement CSV
           </button>
-          <button className="secondary-button" type="button" onClick={onDownloadDetailedCsv} disabled={!canDownloadDetailedCsv}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onDownloadDetailedCsv}
+            disabled={!canDownloadDetailedCsv}
+          >
             Expense CSV
           </button>
           <button
             className="secondary-button"
             type="button"
             onClick={onExportPdf}
-            disabled={!canExportPdf}
-            title="Opens the browser print dialog. Choose Save as PDF to download."
+            disabled={!canExportPdf || pdfExporting}
+            title="Downloads a PDF report directly — no popup required."
           >
-            PDF report
+            {pdfExporting ? 'Generating PDF...' : 'PDF report'}
           </button>
         </div>
       </div>

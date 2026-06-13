@@ -115,6 +115,7 @@ export default function App() {
   const [currentProfile, setCurrentProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const isLocalMode = !hasSupabaseConfig;
@@ -931,27 +932,29 @@ export default function App() {
     setInfo('Settlement summary CSV downloaded.');
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
     if (!memberSummary.length && !expenses.length) {
       setInfo('Add members or expenses before exporting the PDF.');
       return;
     }
 
-    const didOpen = exportTripReportPdf({
-      tripName: selectedTrip?.name || 'Trip group',
-      totalSpent,
-      memberSummary,
-      settlements,
-      expenses,
-      members
-    });
-
-    if (!didOpen) {
-      setError('Allow pop-ups for this site to export the PDF.');
-      return;
+    setPdfExporting(true);
+    setInfo('Generating PDF, please wait...');
+    try {
+      await exportTripReportPdf({
+        tripName: selectedTrip?.name || 'Trip group',
+        totalSpent,
+        memberSummary,
+        settlements,
+        expenses,
+        members
+      });
+      setInfo('PDF downloaded successfully.');
+    } catch (err) {
+      setError('Failed to generate PDF. Please try again.');
+    } finally {
+      setPdfExporting(false);
     }
-
-    setInfo('Print dialog opened for the PDF report. Choose "Save as PDF" to download it.');
   }
 
   async function handleCreateInvite({ invited_email, role }) {
@@ -1077,7 +1080,8 @@ export default function App() {
                 onExportPdf={handleExportPdf}
                 canDownloadDetailedCsv={expenses.length > 0}
                 canDownloadSummaryCsv={memberSummary.length > 0}
-                canExportPdf={memberSummary.length > 0 || expenses.length > 0}
+                canExportPdf={(memberSummary.length > 0 || expenses.length > 0) && !pdfExporting}
+                pdfExporting={pdfExporting}
               />
               {!isLocalMode && !currentRole ? (
                 <div className="info-banner">
