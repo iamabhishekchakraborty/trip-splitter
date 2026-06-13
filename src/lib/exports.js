@@ -6,15 +6,6 @@ function escapeCsvValue(value) {
   return normalized;
 }
 
-function escapeHtml(value) {
-  return String(value == null ? '' : value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function slugifyFilePart(value) {
   return String(value || 'trip')
     .trim()
@@ -27,11 +18,9 @@ function downloadCsvFile(filename, rows) {
   const csvContent = rows
     .map((row) => row.map(escapeCsvValue).join(','))
     .join('\n');
-
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-
   link.href = url;
   link.download = filename;
   link.click();
@@ -58,45 +47,43 @@ function formatNetStatus(value) {
 function formatDateValue(value) {
   if (!value) return '';
   return new Date(value).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
+    day: '2-digit', month: 'short', year: 'numeric'
   });
 }
 
 function formatDateTimeValue(value) {
   if (!value) return '';
   return new Date(value).toLocaleString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
   });
 }
 
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ─── CSV exports ──────────────────────────────────────────────────────────────
+
 export function downloadExpensesCsv({ tripName, expenses, members }) {
-  const memberMap = Object.fromEntries((members || []).map((member) => [member.id, member.name]));
+  const memberMap = Object.fromEntries((members || []).map((m) => [m.id, m.name]));
   const stamp = new Date().toISOString().slice(0, 10);
   const headers = [
-    'Trip Name',
-    'Expense Date',
-    'Description',
-    'Total Amount',
-    'Paid By',
-    'Split Method',
-    'Split Details',
-    'Logged On',
-    'Last Updated'
+    'Trip Name', 'Expense Date', 'Description', 'Total Amount',
+    'Paid By', 'Split Method', 'Split Details', 'Logged On', 'Last Updated'
   ];
 
   const rows = (expenses || []).map((expense) => {
     const splitDetails = (expense.splits || []).length
       ? expense.splits
-        .map((split) => `${memberMap[split.member_id] || 'Unknown'}: INR ${formatCurrency(split.share_amount)}`)
-        .join('; ')
+          .map((s) => `${memberMap[s.member_id] || 'Unknown'}: INR ${formatCurrency(s.share_amount)}`)
+          .join('; ')
       : 'No split details';
-
     return [
       tripName || 'Trip group',
       expense.expense_date || '',
@@ -116,20 +103,17 @@ export function downloadExpensesCsv({ tripName, expenses, members }) {
 export function downloadSummaryCsv({ tripName, totalSpent, memberSummary, settlements }) {
   const stamp = new Date().toISOString().slice(0, 10);
   const generatedOn = formatDateTimeValue(new Date().toISOString());
-  const memberRows = (memberSummary || []).map((member) => ([
-    member.name || 'Unknown',
-    formatCurrency(member.paid),
-    formatCurrency(member.share),
-    formatCurrency(member.balance),
-    formatNetStatus(member.balance)
+
+  const memberRows = (memberSummary || []).map((m) => ([
+    m.name || 'Unknown',
+    formatCurrency(m.paid),
+    formatCurrency(m.share),
+    formatCurrency(m.balance),
+    formatNetStatus(m.balance)
   ]));
 
   const settlementRows = (settlements || []).length
-    ? settlements.map((item) => ([
-      item.from,
-      item.to,
-      formatCurrency(item.amount)
-    ]))
+    ? settlements.map((s) => ([s.from, s.to, formatCurrency(s.amount)]))
     : [['Everyone is settled', '', '']];
 
   const rows = [
@@ -149,136 +133,158 @@ export function downloadSummaryCsv({ tripName, totalSpent, memberSummary, settle
   downloadCsvFile(`${slugifyFilePart(tripName)}-settlement-summary-${stamp}.csv`, rows);
 }
 
-export function exportTripReportPdf({ tripName, totalSpent, memberSummary, settlements, expenses, members }) {
-  const memberMap = Object.fromEntries((members || []).map((member) => [member.id, member.name]));
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+// ─── PDF export — direct download, no popup ───────────────────────────────────
 
-  if (!printWindow) return false;
+function buildReportHtml({ tripName, totalSpent, memberSummary, settlements, expenses, members }) {
+  const memberMap = Object.fromEntries((members || []).map((m) => [m.id, m.name]));
 
-  const summaryRows = (memberSummary || []).map((member) => `
+  const summaryRows = (memberSummary || []).map((m) => `
     <tr>
-      <td>${escapeHtml(member.name)}</td>
-      <td>INR ${formatCurrency(member.paid)}</td>
-      <td>INR ${formatCurrency(member.share)}</td>
-      <td>${member.balance >= 0 ? '+' : ''}INR ${formatCurrency(member.balance)}</td>
-      <td>${formatNetStatus(member.balance)}</td>
+      <td>${escapeHtml(m.name)}</td>
+      <td>INR ${formatCurrency(m.paid)}</td>
+      <td>INR ${formatCurrency(m.share)}</td>
+      <td>${m.balance >= 0 ? '+' : ''}INR ${formatCurrency(m.balance)}</td>
+      <td>${formatNetStatus(m.balance)}</td>
     </tr>
   `).join('');
 
   const settlementRows = (settlements || []).length
-    ? settlements.map((item) => `
-      <tr>
-        <td>${escapeHtml(item.from)}</td>
-        <td>${escapeHtml(item.to)}</td>
-        <td>INR ${formatCurrency(item.amount)}</td>
-      </tr>
-    `).join('')
+    ? settlements.map((s) => `
+        <tr>
+          <td>${escapeHtml(s.from)}</td>
+          <td>${escapeHtml(s.to)}</td>
+          <td>INR ${formatCurrency(s.amount)}</td>
+        </tr>
+      `).join('')
     : '<tr><td colspan="3">Everyone is settled.</td></tr>';
 
   const expenseBlocks = (expenses || []).map((expense) => {
     const splitItems = (expense.splits || []).length
-      ? expense.splits.map((split) => `
-        <li>${escapeHtml(memberMap[split.member_id] || 'Unknown')}: INR ${formatCurrency(split.share_amount)}</li>
-      `).join('')
+      ? expense.splits.map((s) => `
+          <li>${escapeHtml(memberMap[s.member_id] || 'Unknown')}: INR ${formatCurrency(s.share_amount)}</li>
+        `).join('')
       : '<li>No split details</li>';
 
     return `
-      <section class="expense-card">
+      <div class="expense-card">
         <div class="expense-head">
           <div>
             <h3>${escapeHtml(expense.description || 'Expense')}</h3>
-            <p>${formatDateValue(expense.expense_date)} - Paid by ${escapeHtml(memberMap[expense.paid_by] || 'Unknown')}</p>
+            <p>${formatDateValue(expense.expense_date)} · Paid by ${escapeHtml(memberMap[expense.paid_by] || 'Unknown')}</p>
           </div>
           <strong>INR ${formatCurrency(expense.amount)}</strong>
         </div>
-        <p>Split method: ${escapeHtml(formatSplitType(expense.split_type))}</p>
+        <p>Split: ${escapeHtml(formatSplitType(expense.split_type))}</p>
         <ul>${splitItems}</ul>
-        <p class="meta">Logged ${formatDateTimeValue(expense.created_at)}${expense.updated_at && expense.updated_at !== expense.created_at ? ` - Updated ${formatDateTimeValue(expense.updated_at)}` : ''}</p>
-      </section>
+        <p class="meta">Logged ${formatDateTimeValue(expense.created_at)}${expense.updated_at && expense.updated_at !== expense.created_at ? ` · Updated ${formatDateTimeValue(expense.updated_at)}` : ''}</p>
+      </div>
     `;
   }).join('');
 
-  printWindow.document.write(`
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(tripName || 'Trip group')} report</title>
-        <style>
-          body { font-family: Arial, sans-serif; color: #28251d; margin: 32px; }
-          h1, h2, h3, p { margin: 0; }
-          .stack { display: grid; gap: 16px; }
-          .topline { display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 24px; }
-          .muted { color: #6f6d67; font-size: 14px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-          th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #ddd7cb; font-size: 14px; }
-          th { color: #6f6d67; font-weight: 600; }
-          .section { margin-top: 28px; }
-          .expense-card { border: 1px solid #ddd7cb; border-radius: 12px; padding: 16px; margin-top: 12px; }
-          .expense-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
-          ul { margin: 10px 0 0; padding-left: 18px; }
-          li { margin: 4px 0; }
-          .meta { margin-top: 10px; color: #6f6d67; font-size: 12px; }
-          @media print {
-            body { margin: 20px; }
-            .expense-card { break-inside: avoid; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="topline">
-          <div class="stack">
-            <p class="muted">Trip settlement report</p>
-            <h1>${escapeHtml(tripName || 'Trip group')}</h1>
-            <p class="muted">Generated ${escapeHtml(formatDateTimeValue(new Date().toISOString()))}</p>
-          </div>
-          <div class="stack" style="text-align:right;">
-            <p class="muted">Total spent</p>
-            <h2>INR ${formatCurrency(totalSpent)}</h2>
-          </div>
+  return `
+    <div style="font-family:Arial,sans-serif;color:#28251d;padding:32px;width:860px;background:#fff;">
+
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;border-bottom:2px solid #ddd7cb;padding-bottom:16px;">
+        <div>
+          <p style="color:#6f6d67;font-size:12px;margin:0 0 4px;text-transform:uppercase;letter-spacing:0.05em;">Trip settlement report</p>
+          <h1 style="margin:0 0 6px;font-size:22px;">${escapeHtml(tripName || 'Trip group')}</h1>
+          <p style="color:#6f6d67;font-size:12px;margin:0;">Generated ${escapeHtml(formatDateTimeValue(new Date().toISOString()))}</p>
         </div>
+        <div style="text-align:right;">
+          <p style="color:#6f6d67;font-size:12px;margin:0 0 4px;">Total spent</p>
+          <h2 style="margin:0;font-size:20px;">INR ${formatCurrency(totalSpent)}</h2>
+        </div>
+      </div>
 
-        <section class="section">
-          <h2>Who paid what</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th>Paid by member</th>
-                <th>Member's share</th>
-                <th>Net position</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>${summaryRows}</tbody>
-          </table>
-        </section>
+      <h2 style="font-size:15px;margin:0 0 10px;">Who paid what</h2>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+        <thead>
+          <tr style="border-bottom:1px solid #ddd7cb;">
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">Member</th>
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">Paid</th>
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">Share</th>
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">Net</th>
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">Status</th>
+          </tr>
+        </thead>
+        <tbody style="font-size:13px;">${summaryRows}</tbody>
+      </table>
 
-        <section class="section">
-          <h2>How to settle up</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>From</th>
-                <th>To</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>${settlementRows}</tbody>
-          </table>
-        </section>
+      <h2 style="font-size:15px;margin:0 0 10px;">How to settle up</h2>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+        <thead>
+          <tr style="border-bottom:1px solid #ddd7cb;">
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">From</th>
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">To</th>
+            <th style="text-align:left;padding:7px 6px;color:#6f6d67;font-size:12px;font-weight:600;">Amount</th>
+          </tr>
+        </thead>
+        <tbody style="font-size:13px;">${settlementRows}</tbody>
+      </table>
 
-        <section class="section">
-          <h2>Expense details</h2>
-          ${expenseBlocks || '<p class="muted">No expenses recorded yet.</p>'}
-        </section>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.onload = () => {
-    printWindow.print();
-  };
-  return true;
+      <h2 style="font-size:15px;margin:0 0 10px;">Expense details</h2>
+      ${expenseBlocks || '<p style="color:#6f6d67;font-size:13px;">No expenses recorded yet.</p>'}
+
+      <style>
+        .expense-card { border:1px solid #ddd7cb; border-radius:8px; padding:14px; margin-bottom:10px; font-size:13px; }
+        .expense-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:6px; }
+        .expense-head h3 { margin:0 0 3px; font-size:14px; }
+        .expense-head p { margin:0; color:#6f6d67; font-size:12px; }
+        .expense-card p { margin:4px 0; }
+        .expense-card ul { margin:6px 0 0; padding-left:16px; }
+        .expense-card li { margin:2px 0; }
+        .meta { color:#6f6d67; font-size:11px; margin-top:8px !important; }
+        tr td { padding:7px 6px; border-bottom:1px solid #f0ece4; }
+      </style>
+    </div>
+  `;
+}
+
+export async function exportTripReportPdf({ tripName, totalSpent, memberSummary, settlements, expenses, members }) {
+  // Dynamically import — only loaded when PDF button is clicked
+  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+    import('jspdf'),
+    import('html2canvas')
+  ]);
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const filename = `${slugifyFilePart(tripName)}-report-${stamp}.pdf`;
+
+  // Mount an off-screen container so html2canvas can render it
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;background:#fff;';
+  container.innerHTML = buildReportHtml({ tripName, totalSpent, memberSummary, settlements, expenses, members });
+  document.body.appendChild(container);
+
+  try {
+    const canvas = await html2canvas(container.firstElementChild, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: 860
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * pageWidth) / canvas.width;
+
+    // Paginate if report spans multiple pages
+    let yOffset = 0;
+    let remainingHeight = imgHeight;
+    while (remainingHeight > 0) {
+      pdf.addImage(imgData, 'PNG', 0, -yOffset, imgWidth, imgHeight);
+      remainingHeight -= pageHeight;
+      yOffset += pageHeight;
+      if (remainingHeight > 0) pdf.addPage();
+    }
+
+    pdf.save(filename);
+  } finally {
+    document.body.removeChild(container);
+  }
 }
