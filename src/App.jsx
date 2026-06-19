@@ -316,7 +316,7 @@ export default function App() {
       supabase.from('members').select('*').eq('trip_id', tripId).order('created_at', { ascending: true }),
       supabase
         .from('expenses')
-        .select('id, description, amount, paid_by, split_type, expense_date, created_at, updated_at')
+        .select('id, description, amount, paid_by, split_type, expense_date, is_settlement, created_at, updated_at')
         .eq('trip_id', tripId)
         .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false }),
@@ -823,7 +823,8 @@ export default function App() {
       p_split_type: payload.split_type,
       p_expense_date: payload.expense_date,
       p_splits: payload.splits,
-      p_expense_id: expenseId
+      p_expense_id: expenseId,
+      p_is_settlement: payload.is_settlement || false
     });
 
     if (saveError) {
@@ -859,6 +860,50 @@ export default function App() {
 
     const didSave = await saveExpenseWithRpc(payload);
     if (!didSave) return;
+    await loadTripData(selectedTripId);
+  }
+
+  async function handleMarkSettled(settlement) {
+    if (!selectedTripId) {
+      setError('Create or select a trip first.');
+      return;
+    }
+
+    if (!canAddExpenses) {
+      setError('Join this group before recording a settlement.');
+      return;
+    }
+
+    if (!settlement.fromId || !settlement.toId) {
+      setError('Could not identify the members for this settlement.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Record that ${settlement.from} paid ${settlement.to} INR ${settlement.amount.toFixed(2)}?\n\nThis will be added as a settlement entry and the balances will update accordingly.`
+    );
+    if (!confirmed) return;
+
+    const payload = {
+      description: `Settlement: ${settlement.from} paid ${settlement.to}`,
+      amount: settlement.amount,
+      paid_by: settlement.fromId,
+      split_type: 'manual',
+      expense_date: new Date().toISOString().slice(0, 10),
+      is_settlement: true,
+      splits: [{ member_id: settlement.toId, share_amount: settlement.amount }]
+    };
+
+    if (isLocalMode) {
+      addLocalExpense(selectedTripId, payload);
+      await loadTripData(selectedTripId);
+      setInfo('Settlement recorded.');
+      return;
+    }
+
+    const didSave = await saveExpenseWithRpc(payload);
+    if (!didSave) return;
+    setInfo('Settlement recorded.');
     await loadTripData(selectedTripId);
   }
 
@@ -1105,7 +1150,12 @@ export default function App() {
                   onUpdateRole={handleUpdateRole}
                 />
               ) : null}
-              <BalancesPanel memberSummary={memberSummary} settlements={settlements} />
+              <BalancesPanel
+                memberSummary={memberSummary}
+                settlements={settlements}
+                onMarkSettled={handleMarkSettled}
+                canMarkSettled={canAddExpenses}
+              />
               <ExpensesList
                 expenses={expenses}
                 members={members}

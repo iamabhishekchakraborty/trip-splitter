@@ -33,6 +33,7 @@ export default function ExpensesList({
   onDeleteExpense
 }) {
   const [editingExpenseId, setEditingExpenseId] = useState('');
+  const [editingIsSettlement, setEditingIsSettlement] = useState(false);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [expenseDate, setExpenseDate] = useState('');
@@ -57,6 +58,7 @@ export default function ExpensesList({
     setExpenseDate(expense.expense_date);
     setPaidBy(expense.paid_by);
     setSplitType(expense.split_type);
+    setEditingIsSettlement(Boolean(expense.is_settlement));
     const splitMemberIds = expense.splits.map((split) => split.member_id);
     setSelectedMemberIds(splitMemberIds);
     setManualSplits(expense.splits.map((split) => ({
@@ -67,6 +69,9 @@ export default function ExpensesList({
 
   useEffect(() => {
     if (!editingExpenseId) return;
+    const editingExpense = expenses.find((item) => item.id === editingExpenseId);
+    // For settlement expenses, never recalculate splits; preserve exact original amounts.
+    if (editingIsSettlement || editingExpense?.is_settlement) return;
 
     if (splitType === 'equal') {
       setManualSplits(buildEqualSplits(selectedMemberIds, amount));
@@ -77,7 +82,7 @@ export default function ExpensesList({
       const existing = current.find((item) => item.member_id === id);
       return existing || { member_id: id, share_amount: '' };
     }));
-  }, [amount, editingExpenseId, selectedMemberIds, splitType]);
+  }, [amount, editingExpenseId, editingIsSettlement, expenses, selectedMemberIds, splitType]);
 
   function cancelEditing() {
     setEditingExpenseId('');
@@ -86,6 +91,7 @@ export default function ExpensesList({
     setExpenseDate('');
     setPaidBy('');
     setSplitType('equal');
+    setEditingIsSettlement(false);
     setSelectedMemberIds([]);
     setManualSplits([]);
     setFormError('');
@@ -130,6 +136,7 @@ export default function ExpensesList({
       expense_date: expenseDate,
       paid_by: paidBy,
       split_type: splitType,
+      is_settlement: editingIsSettlement,
       splits
     });
 
@@ -144,12 +151,15 @@ export default function ExpensesList({
       </div>
       <div className="stack compact">
         {expenses.length ? expenses.map((expense) => (
-          <article className="expense-item" key={expense.id}>
+          <article className={`expense-item${expense.is_settlement ? ' settlement-item' : ''}`} key={expense.id}>
             <div className="row between wrap-gap">
               <div className="stack mini">
-                <strong>{expense.description}</strong>
+                <strong>
+                  {expense.is_settlement ? '\ud83d\udcb8 ' : ''}{expense.description}
+                  {expense.is_settlement ? <span className="chip subtle settlement-chip">Settlement</span> : null}
+                </strong>
                 <p className="muted">
-                  Paid by {memberMap[expense.paid_by] || 'Unknown'} - {expense.split_type}
+                  Paid by {memberMap[expense.paid_by] || 'Unknown'} - {expense.is_settlement ? 'Settlement payment' : expense.split_type}
                 </p>
                 <p className="muted">Expense date {formatExpenseDate(expense.expense_date)}</p>
                 <p className="muted">Logged {formatLoggedAt(expense.created_at)}</p>
