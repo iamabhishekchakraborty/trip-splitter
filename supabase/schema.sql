@@ -28,6 +28,7 @@ create table if not exists expenses (
   paid_by uuid not null references members(id) on delete restrict,
   split_type text not null check (split_type in ('equal', 'manual')),
   expense_date date not null default current_date,
+  is_settlement boolean not null default false,
   created_by uuid,
   created_at timestamptz not null default now(),
   updated_by uuid,
@@ -86,6 +87,7 @@ alter table expenses add column if not exists expense_date date;
 alter table expenses add column if not exists created_by uuid;
 alter table expenses add column if not exists updated_by uuid;
 alter table expenses add column if not exists updated_at timestamptz;
+alter table expenses add column if not exists is_settlement boolean not null default false;
 alter table user_profiles add column if not exists display_name text;
 
 update members set trip_id = '00000000-0000-0000-0000-000000000001' where trip_id is null;
@@ -665,7 +667,8 @@ create or replace function save_expense_with_splits(
   p_split_type text,
   p_expense_date date,
   p_splits jsonb,
-  p_expense_id uuid default null
+  p_expense_id uuid default null,
+  p_is_settlement boolean default false
 )
 returns uuid
 language plpgsql
@@ -740,12 +743,12 @@ begin
   if p_expense_id is null then
     insert into expenses (
       trip_id, description, amount, paid_by, split_type,
-      expense_date, created_by, updated_by, updated_at
+      expense_date, is_settlement, created_by, updated_by, updated_at
     )
     values (
       p_trip_id, trim(p_description), round(p_amount, 2),
       p_paid_by, p_split_type, p_expense_date,
-      current_user_id, current_user_id, now()
+      coalesce(p_is_settlement, false), current_user_id, current_user_id, now()
     )
     returning id into v_expense_id;
   else
@@ -767,6 +770,7 @@ begin
         paid_by = p_paid_by,
         split_type = p_split_type,
         expense_date = p_expense_date,
+        is_settlement = coalesce(p_is_settlement, is_settlement),
         updated_by = current_user_id,
         updated_at = now()
     where id = p_expense_id;

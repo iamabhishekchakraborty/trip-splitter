@@ -258,18 +258,28 @@ h2 { font-size: var(--text-lg); }
   text-align: right;
 }
 .settlement {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr auto;
-  gap: var(--space-2);
-  align-items: center;
   padding: var(--space-3) 0;
   border-bottom: 1px dashed var(--color-border);
+}
+.settlement > .row {
+  align-items: center;
 }
 .expense-item {
   display: grid;
   gap: var(--space-3);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid rgba(40, 37, 29, 0.08);
+}
+.expense-item.settlement-item {
+  background: rgba(1, 105, 111, 0.04);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(1, 105, 111, 0.12);
+}
+.settlement-chip {
+  margin-left: var(--space-2);
+  font-size: var(--text-sm);
+  vertical-align: middle;
 }
 .error-banner {
   background: rgba(154, 46, 46, 0.1);
