@@ -69,20 +69,17 @@ export default function ExpensesList({
 
   useEffect(() => {
     if (!editingExpenseId) return;
-    const editingExpense = expenses.find((item) => item.id === editingExpenseId);
-    // For settlement expenses, never recalculate splits; preserve exact original amounts.
-    if (editingIsSettlement || editingExpense?.is_settlement) return;
-
+    // Settlement expenses have a fixed exact amount — never auto-recalculate their splits
+    if (editingIsSettlement) return;
     if (splitType === 'equal') {
       setManualSplits(buildEqualSplits(selectedMemberIds, amount));
       return;
     }
-
     setManualSplits((current) => selectedMemberIds.map((id) => {
       const existing = current.find((item) => item.member_id === id);
       return existing || { member_id: id, share_amount: '' };
     }));
-  }, [amount, editingExpenseId, editingIsSettlement, expenses, selectedMemberIds, splitType]);
+  }, [amount, editingExpenseId, editingIsSettlement, selectedMemberIds, splitType]);
 
   function cancelEditing() {
     setEditingExpenseId('');

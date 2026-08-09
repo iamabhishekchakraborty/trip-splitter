@@ -9,7 +9,9 @@ export default function GroupHeader({
   canDownloadDetailedCsv,
   canDownloadSummaryCsv,
   canExportPdf,
-  pdfExporting
+  pdfExporting,
+  onArchive,
+  canArchive
 }) {
   return (
     <section className="group-header card">
@@ -50,6 +52,18 @@ export default function GroupHeader({
             {pdfExporting ? 'Generating PDF...' : 'PDF report'}
           </button>
         </div>
+        {canArchive ? (
+          <div className="export-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={onArchive}
+              title="Hide this group from your active list once the trip is settled. You can restore it anytime."
+            >
+              Archive trip
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );

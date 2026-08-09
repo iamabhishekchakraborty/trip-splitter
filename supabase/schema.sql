@@ -8,6 +8,7 @@ create table if not exists trips (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   created_by uuid,
+  archived_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -81,6 +82,7 @@ create table if not exists trip_invitations (
 -- ============================================================
 
 alter table trips add column if not exists created_by uuid;
+alter table trips add column if not exists archived_at timestamptz;
 alter table members add column if not exists user_id uuid;
 alter table expenses add column if not exists trip_id uuid references trips(id) on delete cascade;
 alter table expenses add column if not exists expense_date date;
@@ -441,6 +443,42 @@ begin
   on conflict (trip_id, user_id) do nothing;
 
   perform ensure_trip_member_record(p_trip_id, current_user_id);
+end;
+$$;
+
+create or replace function set_trip_archived(
+  p_trip_id uuid,
+  p_archived boolean
+)
+returns trips
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid;
+  updated_trip trips;
+begin
+  current_user_id := auth.uid();
+
+  if current_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if not is_trip_admin(p_trip_id) then
+    raise exception 'Only owner/admin can archive or restore this group';
+  end if;
+
+  update trips
+  set archived_at = case when p_archived then now() else null end
+  where id = p_trip_id
+  returning * into updated_trip;
+
+  if updated_trip is null then
+    raise exception 'Trip not found';
+  end if;
+
+  return updated_trip;
 end;
 $$;
 
@@ -852,6 +890,7 @@ drop policy if exists "authenticated cannot direct insert trips" on trips;
 drop policy if exists "trip members can read members" on members;
 drop policy if exists "trip members can add members" on members;
 drop policy if exists "trip admin can delete members" on members;
+drop policy if exists "members can update own name" on members;
 drop policy if exists "trip members can read expenses" on expenses;
 drop policy if exists "trip members can add expenses" on expenses;
 drop policy if exists "creator or admin can edit expenses" on expenses;
@@ -892,6 +931,11 @@ create policy "trip members can add members" on members
 create policy "trip admin can delete members" on members
   for delete to authenticated
   using (is_trip_admin(trip_id));
+
+create policy "members can update own name" on members
+  for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
 -- expenses
 create policy "trip members can read expenses" on expenses

@@ -153,6 +153,12 @@ h2 { font-size: var(--text-lg); }
   min-height: 44px;
 }
 .danger-button:hover { background: rgba(154, 46, 46, 0.18); }
+.whatsapp-share {
+  background: rgba(37, 211, 102, 0.12);
+  color: #1f8a4c;
+  border: 1px solid rgba(37, 211, 102, 0.32);
+}
+.whatsapp-share:hover { background: rgba(37, 211, 102, 0.2); }
 .secondary-button.small,
 .danger-button.small {
   min-height: 34px;

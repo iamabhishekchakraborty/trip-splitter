@@ -755,6 +755,34 @@ export default function App() {
     await loadHomeData();
   }
 
+  async function handleSetTripArchived(tripId, archived) {
+    if (isLocalMode) return;
+
+    setError('');
+    setInfo('');
+    const { error: archiveError } = await supabase.rpc('set_trip_archived', {
+      p_trip_id: tripId,
+      p_archived: archived
+    });
+
+    if (archiveError) {
+      setError(getFriendlyErrorMessage(archiveError));
+      return;
+    }
+
+    setInfo(archived ? 'Group archived. It is now hidden from the active list.' : 'Group restored to active list.');
+    await loadHomeData();
+  }
+
+  async function handleArchiveCurrentTrip() {
+    if (!selectedTripId) return;
+    const confirmed = window.confirm(
+      `Archive "${selectedTrip?.name || 'this group'}"?\n\nIt will be hidden from your active groups list. You can restore it anytime from "Archived groups" on the home screen.`
+    );
+    if (!confirmed) return;
+    await handleSetTripArchived(selectedTripId, true);
+  }
+
   async function handleAcceptInvite(token) {
     if (isLocalMode) return;
     if (!session?.user) {
@@ -1127,6 +1155,8 @@ export default function App() {
                 canDownloadSummaryCsv={memberSummary.length > 0}
                 canExportPdf={(memberSummary.length > 0 || expenses.length > 0) && !pdfExporting}
                 pdfExporting={pdfExporting}
+                onArchive={handleArchiveCurrentTrip}
+                canArchive={!isLocalMode && isAdmin}
               />
               {!isLocalMode && !currentRole ? (
                 <div className="info-banner">
@@ -1142,6 +1172,7 @@ export default function App() {
                   session={session}
                   isOwner={isOwner}
                   isAdmin={isAdmin}
+                  tripName={selectedTrip?.name || 'Trip group'}
                   memberships={groupMemberships}
                   invites={groupInvites}
                   pastInvites={groupPastInvites}
@@ -1175,6 +1206,7 @@ export default function App() {
                 onAddTrip={handleAddTrip}
                 onOpenTrip={loadTripData}
                 onClaimTrip={handleClaimTrip}
+                onRestoreTrip={isLocalMode ? null : (tripId) => handleSetTripArchived(tripId, false)}
                 canCreateTrips={canCreateTrips}
               />
             </>
