@@ -71,12 +71,10 @@ export default function ExpensesList({
     if (!editingExpenseId) return;
     // Settlement expenses have a fixed exact amount — never auto-recalculate their splits
     if (editingIsSettlement) return;
-
     if (splitType === 'equal') {
       setManualSplits(buildEqualSplits(selectedMemberIds, amount));
       return;
     }
-
     setManualSplits((current) => selectedMemberIds.map((id) => {
       const existing = current.find((item) => item.member_id === id);
       return existing || { member_id: id, share_amount: '' };
