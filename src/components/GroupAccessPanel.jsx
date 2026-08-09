@@ -11,6 +11,7 @@ export default function GroupAccessPanel({
   session,
   isOwner,
   isAdmin,
+  tripName,
   memberships,
   invites,
   pastInvites,
@@ -117,6 +118,17 @@ export default function GroupAccessPanel({
                 Copy
               </button>
             </div>
+            <button
+              type="button"
+              className="secondary-button whatsapp-share"
+              onClick={() => {
+                const message = `You're invited to join "${tripName || 'our trip group'}" on Trip Splitter!\n${inviteUrl}`;
+                window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+              }}
+              title="Opens WhatsApp with the invite link ready to send"
+            >
+              Share via WhatsApp
+            </button>
           </>
         ) : null}
         <p className="muted">Role: {invite.role}</p>

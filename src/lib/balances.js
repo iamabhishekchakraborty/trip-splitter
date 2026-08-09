@@ -60,6 +60,8 @@ export function simplifySettlements(balances) {
     settlements.push({
       from: debtors[i].name,
       to: creditors[j].name,
+      fromId: debtors[i].id,
+      toId: creditors[j].id,
       amount
     });
     debtors[i].amount = Number((debtors[i].amount - amount).toFixed(2));

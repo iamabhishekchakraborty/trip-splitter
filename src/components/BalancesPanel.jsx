@@ -1,4 +1,4 @@
-export default function BalancesPanel({ memberSummary, settlements }) {
+export default function BalancesPanel({ memberSummary, settlements, onMarkSettled, canMarkSettled }) {
   return (
     <section className="grid-panel">
       <article className="card stack">
@@ -32,11 +32,24 @@ export default function BalancesPanel({ memberSummary, settlements }) {
         </div>
         <div className="stack compact">
           {settlements.length ? settlements.map((item, index) => (
-            <div className="settlement" key={index}>
-              <span>{item.from}</span>
-              <span>pays</span>
-              <span>{item.to}</span>
-              <strong>INR {item.amount.toFixed(2)}</strong>
+            <div className="settlement row between wrap-gap" key={index}>
+              <div className="row wrap-gap">
+                <span>{item.from}</span>
+                <span>pays</span>
+                <span>{item.to}</span>
+                <strong>INR {item.amount.toFixed(2)}</strong>
+              </div>
+              {onMarkSettled ? (
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  disabled={!canMarkSettled}
+                  onClick={() => onMarkSettled(item)}
+                  title={canMarkSettled ? 'Record this payment as settled' : 'Join this group to record settlements'}
+                >
+                  Mark as settled
+                </button>
+              ) : null}
             </div>
           )) : <p className="muted">Everyone is settled.</p>}
         </div>

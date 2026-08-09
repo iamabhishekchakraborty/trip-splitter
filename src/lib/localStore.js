@@ -171,6 +171,7 @@ export function addLocalExpense(tripId, payload) {
     paid_by: payload.paid_by,
     split_type: payload.split_type,
     expense_date: payload.expense_date,
+    is_settlement: Boolean(payload.is_settlement),
     created_at: new Date().toISOString(),
     splits: payload.splits.map((split) => ({
       member_id: split.member_id,
@@ -196,6 +197,7 @@ export function updateLocalExpense(tripId, expenseId, payload) {
       paid_by: payload.paid_by,
       split_type: payload.split_type,
       expense_date: payload.expense_date,
+      is_settlement: payload.is_settlement !== undefined ? Boolean(payload.is_settlement) : expense.is_settlement,
       updated_at: new Date().toISOString(),
       splits: payload.splits.map((split) => ({
         member_id: split.member_id,
