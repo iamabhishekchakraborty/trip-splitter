@@ -306,6 +306,26 @@ begin
     raise exception 'Authentication required';
   end if;
 
+  -- Security: this function runs as its owner (security definer), so it must not
+  -- trust its arguments. A caller may only create a member record for themselves,
+  -- and only for a trip they already belong to. create_trip_with_owner,
+  -- claim_unowned_trip and accept_trip_invitation all insert the trip_memberships
+  -- row before calling this, so they satisfy both checks.
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if effective_user_id <> auth.uid() then
+    raise exception 'You can only create your own member record';
+  end if;
+
+  if not exists (
+    select 1 from trip_memberships tm
+    where tm.trip_id = p_trip_id and tm.user_id = effective_user_id
+  ) then
+    raise exception 'You are not part of this trip';
+  end if;
+
   effective_name := preferred_display_name(effective_user_id);
   fallback_name := left(effective_name || ' ' || substr(effective_user_id::text, 1, 6), 80);
 
@@ -579,10 +599,19 @@ begin
     raise exception 'Invitation is tied to a different email';
   end if;
 
+  -- Accepting an invitation must never change an existing member's role: roles change
+  -- only through update_trip_member_role (owner only). If the caller is already in the
+  -- group, refuse - the transaction rolls back, so the invitation stays unused.
+  if exists (
+    select 1 from trip_memberships tm
+    where tm.trip_id = invite_row.trip_id and tm.user_id = current_user_id
+  ) then
+    raise exception 'You are already a member of this group';
+  end if;
+
   insert into trip_memberships (trip_id, user_id, role, invited_by)
   values (invite_row.trip_id, current_user_id, invite_row.role, invite_row.created_by)
-  on conflict (trip_id, user_id)
-  do update set role = excluded.role;
+  on conflict (trip_id, user_id) do nothing;
 
   update trip_invitations
   set accepted_at = now(), accepted_by = current_user_id
@@ -696,6 +725,10 @@ begin
   where trip_id = p_trip_id and user_id = p_user_id;
 end;
 $$;
+
+-- Legacy cleanup: earlier versions had no p_is_settlement parameter. Because adding a
+-- parameter creates an overload (not a replacement), drop the old signature first.
+drop function if exists public.save_expense_with_splits(uuid, text, numeric, uuid, text, date, jsonb, uuid);
 
 create or replace function save_expense_with_splits(
   p_trip_id uuid,
@@ -904,6 +937,7 @@ drop policy if exists "trip admin can insert memberships" on trip_memberships;
 drop policy if exists "trip owner can update memberships" on trip_memberships;
 drop policy if exists "trip admin can delete memberships" on trip_memberships;
 drop policy if exists "trip members can read invitations" on trip_invitations;
+drop policy if exists "trip admin can read invitations" on trip_invitations;
 drop policy if exists "trip admin can create invitations" on trip_invitations;
 drop policy if exists "trip admin can update invitations" on trip_invitations;
 drop policy if exists "users can read own and group profiles" on user_profiles;
@@ -1022,9 +1056,10 @@ create policy "trip admin can delete memberships" on trip_memberships
   using (is_trip_admin(trip_id));
 
 -- trip_invitations
-create policy "trip members can read invitations" on trip_invitations
+-- An invitation token grants access to the group, so only owners/admins may read them.
+create policy "trip admin can read invitations" on trip_invitations
   for select to authenticated
-  using (is_trip_member(trip_id));
+  using (is_trip_admin(trip_id));
 
 create policy "trip admin can create invitations" on trip_invitations
   for insert to authenticated
