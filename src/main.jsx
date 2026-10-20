@@ -1,3 +1,13 @@
+/**
+ * Entry point: mounts `<App />` into the `#root` element of
+ * `index.html` inside React's `StrictMode`, and registers the service
+ * worker in production builds.
+ *
+ * In development `StrictMode` deliberately runs effects twice, so
+ * duplicate network calls under `npm run dev` are expected and do not
+ * happen in a production build.
+ */
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';

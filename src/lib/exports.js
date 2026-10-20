@@ -1,3 +1,29 @@
+/**
+ * Client-side report generation: CSV and PDF exports for a trip group.
+ * Everything here runs entirely in the browser - there is no server
+ * round-trip for exports, which keeps them working the same way in
+ * both Supabase mode and local demo mode. Files are produced as Blobs
+ * (CSV) or an in-memory canvas (PDF) and handed to the browser's
+ * native download mechanism.
+ *
+ * Settlement expenses (`expense.is_settlement === true`) are included
+ * alongside regular ones in every export - they are never filtered
+ * out, which matches `computeMemberSummary` in `lib/balances.js`
+ * (also including settlements in each member's paid/share/net). Only
+ * `App.jsx`'s "Total spent" figure excludes them, not the exports.
+ *
+ * Where an export lists individual expenses - {@link
+ * downloadExpensesCsv} and the PDF's expense-details section in
+ * {@link buildReportHtml} - a settlement row is explicitly marked
+ * (a "Type" column in the CSV; the same money-with-wings icon and
+ * "Settlement" label `ExpensesList.jsx` uses, in the PDF) so it can be
+ * told apart from a real expense without having to parse its
+ * description text. {@link downloadSummaryCsv} needs no such marking
+ * since it never lists individual expenses - only aggregate per-member
+ * totals and suggested transfers.
+ */
+
+/** Quotes a CSV field per RFC 4180 if it contains a comma, quote or newline; doubles any internal quotes. `null`/`undefined` become an empty string. */
 function escapeCsvValue(value) {
   const normalized = value == null ? '' : String(value);
   if (/[",\n]/.test(normalized)) {
@@ -6,6 +32,7 @@ function escapeCsvValue(value) {
   return normalized;
 }
 
+/** Turns a trip name into a safe filename fragment (lowercase, `[a-z0-9]` and `-` only, no leading/trailing dashes). Falls back to `'trip'` for an empty or entirely non-alphanumeric name. Shared by all three export functions so filenames stay consistent, e.g. `goa-2026-expenses-2026-06-13.csv`. */
 function slugifyFilePart(value) {
   return String(value || 'trip')
     .trim()
@@ -14,6 +41,15 @@ function slugifyFilePart(value) {
     .replace(/^-+|-+$/g, '') || 'trip';
 }
 
+/**
+ * Joins `rows` (array of arrays) into CSV text and triggers a browser
+ * download via a temporary `Blob` URL - no network request, no
+ * server-side file generation. The anchor element and object URL are
+ * both discarded immediately after `click()`.
+ *
+ * @param {string} filename
+ * @param {Array<Array<*>>} rows - Each inner array is one CSV row; cells are stringified and escaped by {@link escapeCsvValue}.
+ */
 function downloadCsvFile(filename, rows) {
   const csvContent = rows
     .map((row) => row.map(escapeCsvValue).join(','))
@@ -27,16 +63,19 @@ function downloadCsvFile(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
+/** Formats a number as a 2-decimal string (no currency symbol or thousands separator); `null`/`undefined`/`NaN` become `'0.00'`. */
 function formatCurrency(value) {
   return Number(value || 0).toFixed(2);
 }
 
+/** Maps the raw `split_type` value (`'equal'` / `'manual'`) to the human-readable label used in exports. */
 function formatSplitType(value) {
   if (value === 'equal') return 'Equal split';
   if (value === 'manual') return 'Manual split';
   return value || '';
 }
 
+/** Labels a member's net balance as `'Receives'`, `'Pays'` or `'Settled'`. Uses the same +/-0.009 epsilon as the "already settled" check in `lib/balances.js` so a member who nets to (near) zero is never mislabeled due to floating-point rounding. */
 function formatNetStatus(value) {
   const amount = Number(value || 0);
   if (amount > 0.009) return 'Receives';
@@ -44,6 +83,7 @@ function formatNetStatus(value) {
   return 'Settled';
 }
 
+/** Formats a date-only value (e.g. `expense_date`) as `DD Mon YYYY` in the `en-IN` locale. Empty string for a falsy input. */
 function formatDateValue(value) {
   if (!value) return '';
   return new Date(value).toLocaleDateString('en-IN', {
@@ -51,6 +91,7 @@ function formatDateValue(value) {
   });
 }
 
+/** Formats a timestamp (e.g. `created_at`) as `DD Mon YYYY, HH:MM` in the `en-IN` locale. Empty string for a falsy input. */
 function formatDateTimeValue(value) {
   if (!value) return '';
   return new Date(value).toLocaleString('en-IN', {
@@ -59,6 +100,7 @@ function formatDateTimeValue(value) {
   });
 }
 
+/** Escapes a value for safe interpolation into the PDF report's HTML template (`&`, `<`, `>`, `"`, `'`). `null`/`undefined` become an empty string. Every piece of user-entered text (trip name, member names, descriptions) goes through this before being injected into `buildReportHtml`'s template strings. */
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -70,11 +112,23 @@ function escapeHtml(value) {
 
 // ─── CSV exports ──────────────────────────────────────────────────────────────
 
+/**
+ * Downloads one CSV row per expense (including settlements - see file
+ * header), with a readable summary of that expense's splits in a
+ * single "Split Details" cell (`"Alice: INR 500.00; Bob: INR 300.00"`),
+ * rather than one row per split. A "Type" column marks each row
+ * `'Settlement'` or `'Expense'` so the two are distinguishable without
+ * parsing the description text. Best for reviewing what made up the
+ * trip total, as opposed to {@link downloadSummaryCsv} which is for
+ * settling up.
+ *
+ * @param {{tripName?: string, expenses: Array<Object>, members: Array<{id: string, name: string}>}} params - `expenses` need their `splits` already attached (see `App.jsx`'s expense normalization).
+ */
 export function downloadExpensesCsv({ tripName, expenses, members }) {
   const memberMap = Object.fromEntries((members || []).map((m) => [m.id, m.name]));
   const stamp = new Date().toISOString().slice(0, 10);
   const headers = [
-    'Trip Name', 'Expense Date', 'Description', 'Total Amount',
+    'Trip Name', 'Type', 'Expense Date', 'Description', 'Total Amount',
     'Paid By', 'Split Method', 'Split Details', 'Logged On', 'Last Updated'
   ];
 
@@ -86,6 +140,7 @@ export function downloadExpensesCsv({ tripName, expenses, members }) {
       : 'No split details';
     return [
       tripName || 'Trip group',
+      expense.is_settlement ? 'Settlement' : 'Expense',
       expense.expense_date || '',
       expense.description || '',
       formatCurrency(expense.amount),
@@ -100,6 +155,16 @@ export function downloadExpensesCsv({ tripName, expenses, members }) {
   downloadCsvFile(`${slugifyFilePart(tripName)}-expenses-${stamp}.csv`, [headers, ...rows]);
 }
 
+/**
+ * Downloads a CSV with three sections: the trip total, one row per
+ * member from {@link module:lib/balances.computeMemberSummary} (paid /
+ * share / net / status), and the suggested transfers from
+ * {@link module:lib/balances.simplifySettlements}. If the group is
+ * already settled, the transfers section has a single
+ * "Everyone is settled" row instead of being empty.
+ *
+ * @param {{tripName?: string, totalSpent: number, memberSummary: Array<{name: string, paid: number, share: number, balance: number}>, settlements: Array<{from: string, to: string, amount: number}>}} params
+ */
 export function downloadSummaryCsv({ tripName, totalSpent, memberSummary, settlements }) {
   const stamp = new Date().toISOString().slice(0, 10);
   const generatedOn = formatDateTimeValue(new Date().toISOString());
@@ -135,6 +200,17 @@ export function downloadSummaryCsv({ tripName, totalSpent, memberSummary, settle
 
 // ─── PDF export — direct download, no popup ───────────────────────────────────
 
+/**
+ * Builds the self-contained, inline-styled HTML (and a scoped
+ * `<style>` block) that {@link exportTripReportPdf} rasterizes into a
+ * PDF. Kept separate from `exportTripReportPdf` so the markup/styling
+ * can be read and adjusted without touching the canvas/pagination
+ * logic. Not exported - only used internally for the PDF path, not
+ * for an on-screen preview.
+ *
+ * @param {Object} params - Same shape as {@link exportTripReportPdf}.
+ * @returns {string} HTML markup for a single off-screen container element.
+ */
 function buildReportHtml({ tripName, totalSpent, memberSummary, settlements, expenses, members }) {
   const memberMap = Object.fromEntries((members || []).map((m) => [m.id, m.name]));
 
@@ -165,16 +241,20 @@ function buildReportHtml({ tripName, totalSpent, memberSummary, settlements, exp
         `).join('')
       : '<li>No split details</li>';
 
+    const settlementBadge = expense.is_settlement
+      ? ' <span style="background:#e8f5ec;color:#1f8a4c;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;">Settlement</span>'
+      : '';
+
     return `
       <div class="expense-card">
         <div class="expense-head">
           <div>
-            <h3>${escapeHtml(expense.description || 'Expense')}</h3>
+            <h3>${expense.is_settlement ? '\u{1F4B8} ' : ''}${escapeHtml(expense.description || 'Expense')}${settlementBadge}</h3>
             <p>${formatDateValue(expense.expense_date)} · Paid by ${escapeHtml(memberMap[expense.paid_by] || 'Unknown')}</p>
           </div>
           <strong>INR ${formatCurrency(expense.amount)}</strong>
         </div>
-        <p>Split: ${escapeHtml(formatSplitType(expense.split_type))}</p>
+        <p>Split: ${expense.is_settlement ? 'Settlement payment' : escapeHtml(formatSplitType(expense.split_type))}</p>
         <ul>${splitItems}</ul>
         <p class="meta">Logged ${formatDateTimeValue(expense.created_at)}${expense.updated_at && expense.updated_at !== expense.created_at ? ` · Updated ${formatDateTimeValue(expense.updated_at)}` : ''}</p>
       </div>
@@ -240,6 +320,32 @@ function buildReportHtml({ tripName, totalSpent, memberSummary, settlements, exp
   `;
 }
 
+/**
+ * Renders the same data as {@link downloadSummaryCsv} plus the full
+ * expense list into a styled HTML report, rasterizes it with
+ * `html2canvas`, and saves it as a downloaded PDF with `jspdf` -
+ * entirely client-side, with no print dialog or popup window (earlier
+ * versions used `window.print()`, which was blocked by popup blockers
+ * and was unreliable with `document.write`; this replaced it).
+ *
+ * `jspdf` and `html2canvas` are dynamically imported, so they are only
+ * fetched/parsed when a PDF is actually requested, not on initial
+ * page load.
+ *
+ * Implementation notes:
+ * - The report HTML is rendered into an off-screen container
+ *   (`position: fixed; left: -9999px`) so `html2canvas` has real
+ *   layout to measure without it ever being visible to the user; the
+ *   container is removed again in a `finally` block even if rendering
+ *   throws.
+ * - If the rendered report is taller than one A4 page, the same
+ *   captured image is redrawn on successive pages with a progressively
+ *   larger negative y-offset, which is a simple way to paginate a
+ *   single tall raster image without re-measuring per-page content.
+ *
+ * @param {{tripName?: string, totalSpent: number, memberSummary: Array<Object>, settlements: Array<Object>, expenses: Array<Object>, members: Array<Object>}} params - Same data shapes as {@link downloadExpensesCsv} and {@link downloadSummaryCsv} combined.
+ * @returns {Promise<void>} Resolves once the PDF has been handed to the browser's download mechanism.
+ */
 export async function exportTripReportPdf({ tripName, totalSpent, memberSummary, settlements, expenses, members }) {
   // Dynamically import — only loaded when PDF button is clicked
   const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([

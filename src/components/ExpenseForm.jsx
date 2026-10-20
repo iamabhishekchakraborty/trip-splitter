@@ -1,6 +1,33 @@
+/**
+ * The "add expense" form: description, amount, date, payer, split
+ * type (equal/manual), and which members participate.
+ *
+ * Two effects keep the form coherent as `members`/`amount`/`splitType`
+ * change:
+ * 1. Whenever `members` changes, re-pick a valid `paidBy` if the
+ *    current one is no longer a member, and drop any selected member
+ *    ids that no longer exist (falling back to "all members selected"
+ *    if that empties the selection).
+ * 2. Whenever `splitType`/`amount`/`selectedMemberIds` change,
+ *    recompute `manualSplits`: for `'equal'`, via `buildEqualSplits`
+ *    (see `lib/balances.js` for the remainder-rounding rule); for
+ *    `'manual'`, by keeping any already-entered share for a still-
+ *    selected member and giving new members an empty input, so
+ *    switching split type and back does not wipe manually entered
+ *    numbers.
+ *
+ * This component does **not** validate that manual splits sum to the
+ * amount before calling `onAddExpense` - that check happens in
+ * `App.jsx`'s `handleAddExpense` (and again, authoritatively, in the
+ * `save_expense_with_splits` RPC in Supabase mode). A mismatched
+ * manual split is only caught after submit, as a `setError` banner
+ * elsewhere in the page rather than inline on this form.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
 import { buildEqualSplits } from '../lib/balances';
 
+/** Today's date as a `YYYY-MM-DD` string, suitable for an `<input type="date">` value - used both as the initial `expenseDate` and to reset it after a successful submit. */
 function getTodayInputValue() {
   const today = new Date();
   const year = today.getFullYear();
@@ -9,6 +36,12 @@ function getTodayInputValue() {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * @param {Object} props
+ * @param {Array<{id: string, name: string}>} props.members - Trip members eligible as payer/split participants. An empty list disables every field and shows a prompt to add a member first.
+ * @param {(payload: {description: string, amount: number, expense_date: string, paid_by: string, split_type: string, splits: Array<{member_id: string, share_amount: number}>}) => Promise<void>} props.onAddExpense - Called on submit with amounts already coerced to `Number`. The form resets (except `paidBy`, which is left as-is) once this resolves - it is not wrapped in try/catch here, so a rejection would propagate; in practice `App.jsx`'s `handleAddExpense` always resolves and reports errors itself via `setError`.
+ * @param {boolean} props.canAddExpenses - Disables every field and the submit button, and shows an explanatory message, when `false`.
+ */
 export default function ExpenseForm({ members, onAddExpense, canAddExpenses }) {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
@@ -50,6 +83,7 @@ export default function ExpenseForm({ members, onAddExpense, canAddExpenses }) {
     }));
   }, [splitType, amount, selectedMemberIds]);
 
+    /** Adds or removes `memberId` from `selectedMemberIds`. */
   function toggleSplitMember(memberId) {
     setSelectedMemberIds((current) => (
       current.includes(memberId)
@@ -58,12 +92,14 @@ export default function ExpenseForm({ members, onAddExpense, canAddExpenses }) {
     ));
   }
 
+    /** Updates one member's manual split amount, leaving it as the raw (possibly invalid/empty) string from the input until submit, where it is coerced with `Number(... || 0)`. */
   function updateManualShare(memberId, value) {
     setManualSplits((current) => current.map((item) => (
       item.member_id === memberId ? { ...item, share_amount: value } : item
     )));
   }
 
+    /** Validates only what this form can check locally (membership selected, required fields present) and delegates everything else - including the split-sum check - to `onAddExpense`'s caller. See the file header for what is deliberately *not* validated here. */
   async function handleSubmit(e) {
     e.preventDefault();
     setFormError('');

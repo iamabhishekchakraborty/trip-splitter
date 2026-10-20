@@ -1,7 +1,36 @@
+/**
+ * Service worker for the installable app. `src/main.jsx` registers it
+ * in production builds only. Its job is to let the app shell start
+ * without a network connection; it never handles data requests.
+ *
+ * - install: precaches the files in `APP_SHELL` and activates at once
+ *   (`skipWaiting`).
+ * - activate: deletes caches left by any other `CACHE_VERSION` and takes
+ *   control of open pages immediately (`clients.claim`).
+ * - fetch: only same-origin GET requests are handled. Supabase API and
+ *   auth calls, and every non-GET request, go straight to the network
+ *   untouched. Handled requests are network-first: while online the
+ *   response always comes from the network (so a new deploy's hashed
+ *   JS/CSS is picked up immediately) and a copy is stored; if the
+ *   network fails, the stored copy is served, and a page navigation
+ *   with no stored copy gets the cached `/index.html`.
+ *
+ * Because every same-origin GET response is stored - not just the
+ * `APP_SHELL` list - a visit while online also caches the built JS and
+ * CSS, which is what lets the app start offline afterwards. Responses
+ * are stored without checking `response.ok`, and the cache is only
+ * cleaned when `CACHE_VERSION` changes, so files from earlier deploys
+ * pile up until then.
+ *
+ * Bump `CACHE_VERSION` whenever `APP_SHELL` changes (see the README).
+ */
+
 // Trip Splitter — app shell service worker
 // Scope: cache the static app shell only. Never touches API/auth calls.
+/** Name of the current cache. Changing it makes `activate` delete every older cache. */
 const CACHE_VERSION = 'trip-splitter-shell-v2';
 
+/** Files fetched and cached when the worker installs: the page itself, the manifest and the icons. */
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -44,9 +73,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Never cache Vite dev/build JS chunks by a stale hash — always try network first,
-  // fall back to cache only if offline. This keeps the app shell fresh when online
-  // while still working when there's no connection at all.
+  // Network first: while online every response comes from the network, so the app
+  // shell is always fresh (a new deploy's hashed JS/CSS is never shadowed by an old
+  // cached copy). Each response is also stored, and the stored copy is used only
+  // when the network fails.
   event.respondWith(
     fetch(request)
       .then((response) => {
